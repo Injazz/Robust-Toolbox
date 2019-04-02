@@ -350,6 +350,12 @@
     <Compile Include="ViewVariables\ViewVariablesRemoteSession.cs" />
     <Compile Include="ViewVariables\ViewVariablesTrait.cs" />
     <Compile Include="Utility\DiscordClient.cs" />
+    <Compile Include="Utility\NamedPipeClient\IO\NamedPipeClientStream.cs" />
+    <Compile Include="Utility\NamedPipeClient\IO\Exceptions\NamedPipeConnectionException.cs" />
+    <Compile Include="Utility\NamedPipeClient\IO\Exceptions\NamedPipeOpenException.cs" />
+    <Compile Include="Utility\NamedPipeClient\IO\Exceptions\NamedPipeReadException.cs" />
+    <Compile Include="Utility\NamedPipeClient\IO\Exceptions\NamedPipeWriteException.cs" />
+    <Compile Include="Utility\NamedPipeClient\UnityNamedPipe.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Lidgren.Network\Lidgren.Network.csproj">

@@ -175,7 +175,7 @@ namespace SS14.Client
 
             AssemblyLoader.BroadcastRunLevel(AssemblyLoader.RunLevel.PostInit);
 
-            _richPresenceClient = new RichPresenceClient(_client.GameInfo);
+            _richPresenceClient = new RichPresenceClient();
 
             _stateManager.RequestStateChange<MainScreen>();
 
