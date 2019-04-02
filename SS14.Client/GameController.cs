@@ -93,6 +93,8 @@ namespace SS14.Client
         private IClyde _clyde;
         private IFontManagerInternal _fontManager;
 
+        private RichPresenceClient _richPresenceClient;
+
         private void Startup()
         {
             ThreadUtility.MainThread = Thread.CurrentThread;
@@ -172,6 +174,8 @@ namespace SS14.Client
             _client.Initialize();
 
             AssemblyLoader.BroadcastRunLevel(AssemblyLoader.RunLevel.PostInit);
+
+            _richPresenceClient = new RichPresenceClient(_client.GameInfo);
 
             _stateManager.RequestStateChange<MainScreen>();
 
