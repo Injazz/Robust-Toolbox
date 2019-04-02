@@ -1,5 +1,4 @@
-﻿#if (UNITY_WSA || UNITY_WSA_10_0 || UNITY_STANDALONE) && !DISABLE_DISCORD
-using DiscordRPC.IO;
+﻿using DiscordRPC.IO;
 using DiscordRPC.Logging;
 using System;
 using Lachee.IO;
@@ -239,4 +238,3 @@ namespace DiscordRPC.Unity
         }
     }
 }
-#endif
