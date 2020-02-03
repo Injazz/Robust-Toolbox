@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Runtime.Loader;
 using Robust.Shared.GameObjects.Components;
 using Robust.Shared.GameObjects.Components.Transform;
 using Robust.Shared.Interfaces.GameObjects;
@@ -15,7 +13,6 @@ using Robust.Shared.Network.Messages;
 using Robust.Shared.Physics;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Timing;
-using Robust.Shared.Utility;
 
 namespace Robust.Shared.GameObjects
 {
@@ -62,10 +59,14 @@ namespace Robust.Shared.GameObjects
             return new DynamicTree<IEntity>(
                 (in IEntity ent)
                     => ent.TryGetComponent<ICollidableComponent>(out var collider)
+                        // entities with colliders use their world AABB
                         ? collider.WorldAABB
-                        : new Box2(ent.Transform.WorldPosition, ent.Transform.WorldPosition)
-                ,capacity: 16 // TODO: temporarily small, should be large enough to contain an average map's start-up entities
-                ,growthFunc: x => x + 2 // TODO: probably should be logarithmic
+                        // entities w/o colliders are points
+                        : new Box2(ent.Transform.WorldPosition, ent.Transform.WorldPosition),
+                // this should be the average number or predicted number of entities on a map
+                capacity: 16,
+                // this can be tuned to fit the allocation profile
+                growthFunc: x => x == 16 ? 3840 : x + 256
             );
         }
 
@@ -421,20 +422,21 @@ namespace Robust.Shared.GameObjects
 
         /// <inheritdoc />
         public bool AnyEntitiesIntersecting(MapId mapId, Box2 box)
-            => GetEntityTreeForMap(mapId).Query((ref IEntity ent) => false, box);
+            => GetEntityTreeForMap(mapId).Query((ref IEntity ent) => ent.Deleted, box);
 
         /// <inheritdoc />
         public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 box)
         {
             foreach (var ent in GetEntityTreeForMap(mapId).Query(box))
-                yield return ent;
+                if (!ent.Deleted)
+                    yield return ent;
         }
 
         /// <inheritdoc />
         public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position)
         {
             foreach (var ent in GetEntityTreeForMap(mapId).Query(position)) {
-                if (ent.Transform.MapID == mapId)
+                if (!ent.Deleted)
                     yield return ent;
             }
         }
