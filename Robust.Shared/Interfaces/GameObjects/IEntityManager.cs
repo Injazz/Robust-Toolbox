@@ -3,6 +3,7 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Network.Messages;
+using Robust.Shared.Physics;
 using Robust.Shared.Timing;
 
 namespace Robust.Shared.Interfaces.GameObjects
@@ -191,5 +192,10 @@ namespace Robust.Shared.Interfaces.GameObjects
         IEnumerable<IEntity> GetEntitiesInArc(GridCoordinates coordinates, float range, Angle direction, float arcWidth);
 
         #endregion
+
+        DynamicTree<IEntity> GetEntityTreeForMap(MapId mapId);
+
+        void RemoveFromEntityTree(IEntity entity);
+
     }
 }

@@ -7,7 +7,7 @@ using Robust.Shared.Timing;
 
 namespace Robust.Shared.Interfaces.GameObjects
 {
-    public interface IEntity
+    public interface IEntity : IEquatable<IEntity>
     {
         GameTick LastModifiedTick { get; }
 

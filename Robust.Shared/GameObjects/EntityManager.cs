@@ -1,5 +1,8 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.Loader;
 using Robust.Shared.GameObjects.Components;
 using Robust.Shared.GameObjects.Components.Transform;
 using Robust.Shared.Interfaces.GameObjects;
@@ -9,6 +12,7 @@ using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Network.Messages;
+using Robust.Shared.Physics;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Timing;
 using Robust.Shared.Utility;
@@ -42,14 +46,26 @@ namespace Robust.Shared.GameObjects
         public IEntityNetworkManager EntityNetManager => EntityNetworkManager;
 
         /// <summary>
-        ///     All entities currently stored in the manager.
+        /// All entities currently stored in the manager, also used for iteration.
         /// </summary>
-        protected readonly Dictionary<EntityUid, IEntity> Entities = new Dictionary<EntityUid, IEntity>();
+        protected readonly ConcurrentDictionary<EntityUid, IEntity> Entities
+            = new ConcurrentDictionary<EntityUid, IEntity>();
 
         /// <summary>
-        /// List of all entities, used for iteration.
+        /// All entities organized by map and location.
         /// </summary>
-        protected readonly List<Entity> _allEntities = new List<Entity>();
+        protected readonly ConcurrentDictionary<MapId, DynamicTree<IEntity>> MapEntityTrees
+            = new ConcurrentDictionary<MapId, DynamicTree<IEntity>>();
+
+        private DynamicTree<IEntity> EntityTreeFactory()
+        {
+            return new DynamicTree<IEntity>(
+                (in IEntity ent)
+                    => ent.TryGetComponent<ICollidableComponent>(out var collider)
+                        ? collider.WorldAABB
+                        : new Box2(ent.Transform.WorldPosition, ent.Transform.WorldPosition)
+            );
+        }
 
         protected readonly Queue<IncomingEntityMessage> NetworkMessageBuffer = new Queue<IncomingEntityMessage>();
 
@@ -159,12 +175,9 @@ namespace Robust.Shared.GameObjects
 
         public IEnumerable<IEntity> GetEntities()
         {
-            // Manual index loop to allow adding to the list while iterating.
-            // ReSharper disable once ForCanBeConvertedToForeach
-            // ReSharper disable once LoopCanBeConvertedToQuery
-            for (var i = 0; i < _allEntities.Count; i++)
+            // will not abort if collection modified
+            foreach ( var entity in Entities.Values )
             {
-                var entity = _allEntities[i];
                 if (entity.Deleted)
                 {
                     continue;
@@ -249,12 +262,19 @@ namespace Robust.Shared.GameObjects
             _componentManager.AddComponent<MetaDataComponent>(entity);
 
             // allocate the required TransformComponent
-            _componentManager.AddComponent<TransformComponent>(entity);
+            var tc = _componentManager.AddComponent<TransformComponent>(entity);
 
             Entities[entity.Uid] = entity;
-            _allEntities.Add(entity);
 
             return entity;
+        }
+
+        public DynamicTree<IEntity> GetEntityTreeForMap(MapId mapId)
+            => MapEntityTrees.GetOrAdd(mapId, _ => EntityTreeFactory());
+
+        public void RemoveFromEntityTree(IEntity entity) {
+            foreach ( var mapId in _mapManager.GetAllMapIds())
+                GetEntityTreeForMap(mapId).Remove(entity);
         }
 
         /// <summary>
@@ -296,19 +316,17 @@ namespace Robust.Shared.GameObjects
             // Culling happens in updates.
             // It doesn't matter because to-be culled entities can't be accessed.
             // This should prevent most cases of "somebody is iterating while we're removing things"
-            for (var i = 0; i < _allEntities.Count; i++)
+
+            foreach ( var entity in Entities.Values)
             {
-                var entity = _allEntities[i];
                 if (!entity.Deleted)
                 {
                     continue;
                 }
 
-                _allEntities.RemoveSwap(i);
-                Entities.Remove(entity.Uid);
+                Entities.Remove(entity.Uid, out _);
 
-                // Process the one we just swapped next.
-                i--;
+                RemoveFromEntityTree(entity);
             }
         }
 
@@ -401,75 +419,21 @@ namespace Robust.Shared.GameObjects
 
         /// <inheritdoc />
         public bool AnyEntitiesIntersecting(MapId mapId, Box2 box)
-        {
-            foreach (var entity in GetEntities())
-            {
-                var transform = entity.Transform;
-                if (transform.MapID != mapId)
-                    continue;
-
-                if (entity.TryGetComponent<ICollidableComponent>(out var component))
-                {
-                    if (box.Intersects(component.WorldAABB))
-                        return true;
-                }
-                else
-                {
-                    if (box.Contains(transform.WorldPosition))
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
+            => GetEntityTreeForMap(mapId).Query((ref IEntity ent) => false, box);
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 position)
+        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 box)
         {
-            foreach (var entity in GetEntities())
-            {
-                var transform = entity.Transform;
-                if (transform.MapID != mapId)
-                    continue;
-
-                if (entity.TryGetComponent<ICollidableComponent>(out var component))
-                {
-                    if (position.Intersects(component.WorldAABB))
-                        yield return entity;
-                }
-                else
-                {
-                    if (position.Contains(transform.WorldPosition))
-                    {
-                        yield return entity;
-                    }
-                }
-            }
+            foreach (var ent in GetEntityTreeForMap(mapId).Query(box))
+                yield return ent;
         }
 
         /// <inheritdoc />
         public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position)
         {
-            foreach (var entity in GetEntities())
-            {
-                var transform = entity.Transform;
-                if (transform.MapID != mapId)
-                    continue;
-
-                if (entity.TryGetComponent<ICollidableComponent>(out var component))
-                {
-                    if (component.WorldAABB.Contains(position))
-                        yield return entity;
-                }
-                else
-                {
-                    if (FloatMath.CloseTo(transform.GridPosition.X, position.X) && FloatMath.CloseTo(transform.GridPosition.Y, position.Y))
-                    {
-                        yield return entity;
-                    }
-                }
+            foreach (var ent in GetEntityTreeForMap(mapId).Query(position)) {
+                if (ent.Transform.MapID == mapId)
+                    yield return ent;
             }
         }
 
@@ -507,7 +471,7 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public IEnumerable<IEntity> GetEntitiesInRange(MapId mapId, Box2 box, float range)
         {
-            var aabb = new Box2(box.Left - range, box.Top - range, box.Right + range, box.Bottom + range);
+            var aabb = new Box2(box.Left - range, box.Bottom - range, box.Right + range, box.Top + range);
             return GetEntitiesIntersecting(mapId, aabb);
         }
 

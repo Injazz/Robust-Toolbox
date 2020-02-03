@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
+using System.Reflection;
 using Robust.Shared.Interfaces.Reflection;
 using Robust.Shared.IoC;
 
@@ -42,6 +44,32 @@ namespace Robust.Shared.Serialization
         /// <param name="alwaysWrite">If true, always write this field to map saving, even if it matches the default.</param>
         /// <typeparam name="T">The type of the field that will be read/written.</typeparam>
         public abstract void DataField<T>(ref T value, string name, T defaultValue, bool alwaysWrite = false);
+
+        /// <summary>
+        ///     Reads or writes a field or property by reference.
+        /// </summary>
+        public void DataField<TBase, T>(TBase obj, Expression<Func<TBase, T>> binding, string name = null, T defaultValue = default, bool alwaysWrite = false)
+        {
+            if (!(binding.Body is MemberExpression member))
+                throw new NotImplementedException(binding.Body.GetType().FullName);
+
+            if (name == null) name = member.Member.Name;
+
+            switch (member.Member) {
+                case FieldInfo fieldInfo: {
+                    var value = (T) fieldInfo.GetValue(obj);
+                    DataField(ref value, name, defaultValue, alwaysWrite);
+                    fieldInfo.SetValue(obj, value);
+                    break;
+                }
+                case PropertyInfo propInfo: {
+                    var value = (T) propInfo.GetValue(obj);
+                    DataField(ref value, name, defaultValue, alwaysWrite);
+                    propInfo.SetValue(obj, value);
+                    break;
+                }
+            }
+        }
 
         /// <summary>
         ///     Writes or reads a simple field by reference.

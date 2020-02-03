@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 
 namespace Robust.Shared.Maths
 {
@@ -7,8 +8,7 @@ namespace Robust.Shared.Maths
     ///     Uses a right-handed coordinate system. This means that X+ is to the right and Y+ up.
     /// </summary>
     [Serializable]
-    public readonly struct Box2 : IEquatable<Box2>
-    {
+    public readonly struct Box2 : IEquatable<Box2> {
         /// <summary>
         ///     The X coordinate of the left edge of the box.
         /// </summary>
@@ -113,22 +113,33 @@ namespace Robust.Shared.Maths
             return new Box2();
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsEmpty()
         {
             return FloatMath.CloseTo(Width, 0.0f) && FloatMath.CloseTo(Height, 0.0f);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Encloses(in Box2 inner)
         {
             return this.Left < inner.Left && this.Bottom < inner.Bottom && this.Right > inner.Right &&
-                   this.Top > inner.Top;
+                this.Top > inner.Top;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool Contains(in Box2 inner)
+            => Left <= inner.Left
+                && Bottom <= inner.Bottom
+                && Right >= inner.Right
+                && Top >= inner.Top;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Contains(float x, float y)
         {
             return Contains(new Vector2(x, y));
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Contains(Vector2 point, bool closedRegion = true)
         {
             var xOk = closedRegion
@@ -211,5 +222,41 @@ namespace Robust.Shared.Maths
         {
             return $"({Left}, {Bottom}, {Right}, {Top})";
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float Area(in Box2 box)
+            => box.Width * box.Height;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float Perimeter(in Box2 box)
+            => (box.Width + box.Height) * 2;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Box2 Combine(in Box2 a, in Box2 b)
+            => new Box2(
+                MathF.Min(a.Left, b.Left),
+                MathF.Min(a.Bottom, b.Bottom),
+                MathF.Max(a.Right, b.Right),
+                MathF.Max(a.Top, b.Top)
+            );
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Box2 Combine(in Vector2 a, in Vector2 b)
+            => new Box2(
+                MathF.Min(a.X, b.X),
+                MathF.Min(a.Y, b.Y),
+                MathF.Max(a.X, b.X),
+                MathF.Max(a.Y, b.Y)
+            );
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Box2 Grow(in Box2 box, float range)
+            => new Box2(
+                box.Left - range,
+                box.Bottom - range,
+                box.Right + range,
+                box.Top + range
+            );
+
     }
 }

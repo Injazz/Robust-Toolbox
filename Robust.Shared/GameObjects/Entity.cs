@@ -1,8 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using Robust.Shared.GameObjects.Components.Map;
+using Robust.Shared.GameObjects.Components.Transform;
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.GameObjects.Components;
+using Robust.Shared.Map;
 using Robust.Shared.Timing;
 using Robust.Shared.Utility;
 using Robust.Shared.ViewVariables;
@@ -10,8 +13,7 @@ using Robust.Shared.ViewVariables;
 namespace Robust.Shared.GameObjects
 {
     /// <inheritdoc />
-    public sealed class Entity : IEntity
-    {
+    public sealed class Entity : IEntity {
         #region Members
 
         /// <inheritdoc />
@@ -165,6 +167,8 @@ namespace Robust.Shared.GameObjects
                 if (comp != null && comp.Initialized && !comp.Deleted)
                     comp.Running = true;
             }
+
+            UpdateEntityTree();
         }
 
         #endregion Initialization
@@ -336,6 +340,21 @@ namespace Robust.Shared.GameObjects
         public void Dirty()
         {
             LastModifiedTick = EntityManager.CurrentTick;
+
+            if (Deleted)
+                return;
+
+            UpdateEntityTree();
+        }
+
+        private void UpdateEntityTree() {
+            if (TryGetComponent(out ITransformComponent tx) && tx.Initialized) {
+                    EntityManager.GetEntityTreeForMap(tx.MapID)
+                        .AddOrUpdate(tx.Owner);
+            }
+            else {
+                EntityManager.RemoveFromEntityTree(this);
+            }
         }
 
         #endregion GameState
@@ -345,5 +364,23 @@ namespace Robust.Shared.GameObjects
         {
             return $"{Name} ({Uid}, {Prototype?.ID})";
         }
+
+        #region IEquatable<IEntity>
+        public bool Equals(IEntity other)
+            => Uid.Equals(other.Uid);
+
+        public override bool Equals(object obj)
+            => ReferenceEquals(this, obj) || obj is IEntity other && Equals(other);
+
+        public override int GetHashCode()
+            => Uid.GetHashCode();
+
+        public static bool operator ==(Entity left, Entity right)
+            => Equals(left, right);
+
+        public static bool operator !=(Entity left, Entity right)
+            => !Equals(left, right);
+        #endregion
+
     }
 }
