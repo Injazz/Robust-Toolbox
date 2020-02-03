@@ -2,15 +2,19 @@ using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
-namespace Robust.Shared.Physics {
+namespace Robust.Shared.Physics
+{
 
-    public partial class DynamicTree {
+    public partial class DynamicTree
+    {
 
-        public readonly struct Proxy : IEquatable<Proxy>, IComparable<Proxy> {
+        public readonly struct Proxy : IEquatable<Proxy>, IComparable<Proxy>
+        {
 
             private readonly int _value;
 
-            public static Proxy Free {
+            public static Proxy Free
+            {
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
                 get => new Proxy(-1);
             }

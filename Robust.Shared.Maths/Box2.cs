@@ -8,7 +8,8 @@ namespace Robust.Shared.Maths
     ///     Uses a right-handed coordinate system. This means that X+ is to the right and Y+ up.
     /// </summary>
     [Serializable]
-    public readonly struct Box2 : IEquatable<Box2> {
+    public readonly struct Box2 : IEquatable<Box2>
+    {
         /// <summary>
         ///     The X coordinate of the left edge of the box.
         /// </summary>

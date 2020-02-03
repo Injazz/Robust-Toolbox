@@ -27,10 +27,12 @@ using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
 using Robust.Shared.Maths;
 
-namespace Robust.Shared.Physics {
+namespace Robust.Shared.Physics
+{
 
     [PublicAPI]
-    public abstract partial class DynamicTree {
+    public abstract partial class DynamicTree
+    {
 
         public const int MinimumCapacity = 16;
 
@@ -40,7 +42,8 @@ namespace Robust.Shared.Physics {
 
         protected readonly Func<int, int> GrowthFunc;
 
-        protected DynamicTree(float aabbExtendSize, Func<int, int> growthFunc) {
+        protected DynamicTree(float aabbExtendSize, Func<int, int> growthFunc)
+        {
             AabbExtendSize = aabbExtendSize;
             GrowthFunc = growthFunc ?? DefaultGrowthFunc;
         }
@@ -54,7 +57,8 @@ namespace Robust.Shared.Physics {
     [PublicAPI]
     [DebuggerDisplay("{" + nameof(DebuggerDisplay) + "}")]
     public sealed partial class DynamicTree<T>
-        : DynamicTree, ICollection<T> {
+        : DynamicTree, ICollection<T>
+    {
 
         public delegate Box2 ExtractAabbDelegate(in T value);
 
@@ -68,7 +72,7 @@ namespace Robust.Shared.Physics {
 
         private Proxy _freeNodes;
 
-        // avoid "Collection was modified; enumeration operation may not execute."
+        // avoids "Collection was modified; enumeration operation may not execute."
         private ConcurrentDictionary<T, Proxy> _nodeLookup;
 
         private Node[] _nodes;
@@ -76,7 +80,8 @@ namespace Robust.Shared.Physics {
         private Proxy _root;
 
         public DynamicTree(ExtractAabbDelegate extractAabbFunc, IEqualityComparer<T> comparer = null, float aabbExtendSize = 1f / 32, int capacity = 256, Func<int, int> growthFunc = null)
-            : base(aabbExtendSize, growthFunc) {
+            : base(aabbExtendSize, growthFunc)
+        {
             _extractAabb = extractAabbFunc;
             _equalityComparer = comparer ?? EqualityComparer<T>.Default;
             capacity = Math.Max(MinimumCapacity, capacity);
@@ -87,7 +92,8 @@ namespace Robust.Shared.Physics {
             _nodes = new Node[capacity];
 
             var l = Capacity - 1;
-            for (var i = 0; i < l; ++i) {
+            for (var i = 0; i < l; ++i)
+            {
                 ref var node = ref _nodes[i];
                 node.Parent = (Proxy) (i + 1);
                 node.Height = -1;
@@ -101,13 +107,110 @@ namespace Robust.Shared.Physics {
 
         private int Capacity => _nodes.Length;
 
+        public int Height
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _root == Proxy.Free ? 0 : _nodes[_root].Height;
+        }
+
+        public int MaxBalance
+        {
+            [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
+            get
+            {
+                var maxBal = 0;
+
+                for (var i = 0; i < Capacity; ++i)
+                {
+                    ref var node = ref _nodes[i];
+                    if (node.Height <= 1)
+                    {
+                        continue;
+                    }
+
+                    ref var child1Node = ref _nodes[node.Child1];
+                    ref var child2Node = ref _nodes[node.Child2];
+
+                    var bal = Math.Abs(child2Node.Height - child1Node.Height);
+                    maxBal = Math.Max(maxBal, bal);
+                }
+
+                return maxBal;
+            }
+        }
+
+        public float AreaRatio
+        {
+            [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
+            get
+            {
+                if (_root == Proxy.Free)
+                {
+                    return 0;
+                }
+
+                ref var rootNode = ref _nodes[_root];
+                var rootPeri = Box2.Perimeter(rootNode.Aabb);
+
+                var totalPeri = 0f;
+
+                for (var i = 0; i < Capacity; ++i)
+                {
+                    ref var node = ref _nodes[i];
+                    if (node.Height < 0)
+                    {
+                        continue;
+                    }
+
+                    totalPeri += Box2.Perimeter(node.Aabb);
+                }
+
+                return totalPeri / rootPeri;
+            }
+        }
+
+        public string DebuggerDisplay
+            => $"Count = {Count}, Capacity = {Capacity}, Height = {Height}";
+
+        private IEnumerable<(Proxy, Node)> DebugAllocatedNodesEnumerable
+        {
+            get
+            {
+                for (var i = 0; i < _nodes.Length; i++)
+                {
+                    var node = _nodes[i];
+                    if (!node.IsFree)
+                    {
+                        yield return ((Proxy) i, node);
+                    }
+                }
+            }
+        }
+
+        [DebuggerBrowsable(DebuggerBrowsableState.RootHidden)]
+        private (Proxy, Node)[] DebugAllocatedNodes
+        {
+            get
+            {
+                var data = new (Proxy, Node)[Count];
+                var i = 0;
+                foreach (var x in DebugAllocatedNodesEnumerable)
+                {
+                    data[i++] = x;
+                }
+
+                return data;
+            }
+        }
+
         public IEnumerator<T> GetEnumerator()
             => _nodeLookup.Keys.GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator()
             => GetEnumerator();
 
-        public void Clear() {
+        public void Clear()
+        {
             var capacity = Capacity;
 
             Count = 0;
@@ -118,7 +221,8 @@ namespace Robust.Shared.Physics {
             _nodes = new Node[capacity];
 
             var l = Capacity - 1;
-            for (var i = 0; i < l; ++i) {
+            for (var i = 0; i < l; ++i)
+            {
                 ref var node = ref _nodes[i];
                 node.Parent = (Proxy) (i + 1);
                 node.Height = -1;
@@ -141,19 +245,25 @@ namespace Robust.Shared.Physics {
         public bool IsReadOnly
             => false;
 
+        void ICollection<T>.Add(T item)
+            => Add(item);
+
+        bool ICollection<T>.Remove(T item)
+            => Remove(item);
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Add(in T item)
             => CreateProxy(_extractAabb(item), item);
 
-        void ICollection<T>.Add(T item)
-            => Add(item);
-
         private bool TryGetProxy(in T item, out Proxy proxy)
             => _nodeLookup.TryGetValue(item, out proxy);
 
-        public bool Remove(in T item) {
+        public bool Remove(in T item)
+        {
             if (!TryGetProxy(item, out var proxy))
+            {
                 return false;
+            }
 
             DestroyProxy(proxy);
 
@@ -163,11 +273,9 @@ namespace Robust.Shared.Physics {
             return true;
         }
 
-        bool ICollection<T>.Remove(T item)
-            => Remove(item);
-
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        private Proxy CreateProxy(in Box2 box, in T item) {
+        private Proxy CreateProxy(in Box2 box, in T item)
+        {
             var proxy = AllocateNode();
 
             ref var node = ref _nodes[proxy];
@@ -189,15 +297,19 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void DestroyProxy(Proxy proxy) {
+        private void DestroyProxy(Proxy proxy)
+        {
             RemoveLeaf(proxy);
             FreeNode(proxy);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        public bool Update(in T item) {
+        public bool Update(in T item)
+        {
             if (!TryGetProxy(item, out var leaf))
+            {
                 return false;
+            }
 
             var leafNode = _nodes[leaf];
 
@@ -208,7 +320,9 @@ namespace Robust.Shared.Physics {
             var newBox = _extractAabb(item);
 
             if (leafNode.Aabb.Contains(newBox))
+            {
                 return false;
+            }
 
             var movedDist = newBox.Center - oldBox.Center;
 
@@ -236,34 +350,49 @@ namespace Robust.Shared.Physics {
             => ref _nodes[proxy].Aabb;
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        public bool Query(QueryCallbackDelegate callback, in Box2 aabb) {
+        public bool Query(QueryCallbackDelegate callback, in Box2 aabb)
+        {
             var stack = new Stack<Proxy>(256);
 
             stack.Push(_root);
 
             var any = false;
 
-            while (stack.Count > 0) {
+            while (stack.Count > 0)
+            {
                 var proxy = stack.Pop();
 
                 if (proxy == Proxy.Free)
+                {
                     continue;
+                }
 
                 ref var node = ref _nodes[proxy];
 
                 if (!node.Aabb.Intersects(aabb))
+                {
                     continue;
+                }
 
-                if (!node.IsLeaf) {
+                if (!node.IsLeaf)
+                {
                     if (node.Child1 != Proxy.Free)
+                    {
                         stack.Push(node.Child1);
+                    }
+
                     if (node.Child2 != Proxy.Free)
+                    {
                         stack.Push(node.Child2);
+                    }
+
                     continue;
                 }
 
                 if (!callback(ref node.Item))
+                {
                     return true;
+                }
 
                 any = true;
             }
@@ -272,34 +401,49 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        public bool Query(QueryCallbackDelegate callback, in Vector2 point) {
+        public bool Query(QueryCallbackDelegate callback, in Vector2 point)
+        {
             var stack = new Stack<Proxy>(256);
 
             stack.Push(_root);
 
             var any = false;
 
-            while (stack.Count > 0) {
+            while (stack.Count > 0)
+            {
                 var proxy = stack.Pop();
 
                 if (proxy == Proxy.Free)
+                {
                     continue;
+                }
 
                 ref var node = ref _nodes[proxy];
 
                 if (!node.Aabb.Contains(point))
+                {
                     continue;
+                }
 
-                if (!node.IsLeaf) {
+                if (!node.IsLeaf)
+                {
                     if (node.Child1 != Proxy.Free)
+                    {
                         stack.Push(node.Child1);
+                    }
+
                     if (node.Child2 != Proxy.Free)
+                    {
                         stack.Push(node.Child2);
+                    }
+
                     continue;
                 }
 
                 if (!callback(ref node.Item))
+                {
                     return true;
+                }
 
                 any = true;
             }
@@ -308,30 +452,43 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        public IEnumerable<T> Query(Box2 aabb) {
+        public IEnumerable<T> Query(Box2 aabb)
+        {
             var stack = new Stack<Proxy>(256);
 
             stack.Push(_root);
 
             var any = false;
 
-            while (stack.Count > 0) {
+            while (stack.Count > 0)
+            {
                 var proxy = stack.Pop();
 
                 if (proxy == Proxy.Free)
+                {
                     continue;
+                }
 
                 // note: non-ref stack local copy here
                 var node = _nodes[proxy];
 
                 if (!node.Aabb.Intersects(aabb))
+                {
                     continue;
+                }
 
-                if (!node.IsLeaf) {
+                if (!node.IsLeaf)
+                {
                     if (node.Child1 != Proxy.Free)
+                    {
                         stack.Push(node.Child1);
+                    }
+
                     if (node.Child2 != Proxy.Free)
+                    {
                         stack.Push(node.Child2);
+                    }
+
                     continue;
                 }
 
@@ -340,30 +497,43 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        public IEnumerable<T> Query(Vector2 point) {
+        public IEnumerable<T> Query(Vector2 point)
+        {
             var stack = new Stack<Proxy>(256);
 
             stack.Push(_root);
 
             var any = false;
 
-            while (stack.Count > 0) {
+            while (stack.Count > 0)
+            {
                 var proxy = stack.Pop();
 
                 if (proxy == Proxy.Free)
+                {
                     continue;
+                }
 
                 // note: non-ref stack local copy here
                 var node = _nodes[proxy];
 
                 if (!node.Aabb.Contains(point))
+                {
                     continue;
+                }
 
-                if (!node.IsLeaf) {
+                if (!node.IsLeaf)
+                {
                     if (node.Child1 != Proxy.Free)
+                    {
                         stack.Push(node.Child1);
+                    }
+
                     if (node.Child2 != Proxy.Free)
+                    {
                         stack.Push(node.Child2);
+                    }
+
                     continue;
                 }
 
@@ -372,7 +542,8 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        public bool Query(QueryCallbackDelegate callback, in Vector2 start, in Vector2 end) {
+        public bool Query(QueryCallbackDelegate callback, in Vector2 start, in Vector2 end)
+        {
             var r = (end - start).Normalized;
 
             var v = new Vector2(-r.Y, r.X);
@@ -386,16 +557,21 @@ namespace Robust.Shared.Physics {
 
             var any = false;
 
-            while (stack.Count > 0) {
+            while (stack.Count > 0)
+            {
                 var proxy = stack.Pop();
 
                 if (proxy == Proxy.Free)
+                {
                     continue;
+                }
 
                 ref var node = ref _nodes[proxy];
 
                 if (!node.Aabb.Intersects(aabb))
+                {
                     continue;
+                }
 
                 var c = node.Aabb.Center;
                 var h = (node.Aabb.BottomRight - node.Aabb.TopLeft) * .5f;
@@ -403,21 +579,32 @@ namespace Robust.Shared.Physics {
                 var separation = MathF.Abs(Dot(v, start - c) - Dot(absV, h));
 
                 if (separation > 0)
+                {
                     continue;
+                }
 
-                if (node.IsLeaf) {
+                if (node.IsLeaf)
+                {
                     any = true;
 
                     var carryOn = callback(ref node.Item);
 
                     if (!carryOn)
+                    {
                         return true;
+                    }
                 }
-                else {
+                else
+                {
                     if (node.Child1 != Proxy.Free)
+                    {
                         stack.Push(node.Child1);
+                    }
+
                     if (node.Child2 != Proxy.Free)
+                    {
                         stack.Push(node.Child2);
+                    }
                 }
             }
 
@@ -429,7 +616,8 @@ namespace Robust.Shared.Physics {
             => a.X * b.X + a.Y * b.Y;
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        public bool Query(RayQueryCallbackDelegate callback, in Vector2 start, in Vector2 dir) {
+        public bool Query(RayQueryCallbackDelegate callback, in Vector2 start, in Vector2 dir)
+        {
             var stack = new Stack<Proxy>(256);
 
             stack.Push(_root);
@@ -438,120 +626,97 @@ namespace Robust.Shared.Physics {
 
             var ray = new Ray(start, dir);
 
-            while (stack.Count > 0) {
+            while (stack.Count > 0)
+            {
                 var proxy = stack.Pop();
 
                 if (proxy == Proxy.Free)
+                {
                     continue;
+                }
 
                 ref var node = ref _nodes[proxy];
 
                 if (!ray.Intersects(node.Aabb, out var dist, out var hit))
+                {
                     continue;
+                }
 
-                if (node.IsLeaf) {
+                if (node.IsLeaf)
+                {
                     any = true;
 
                     var carryOn = callback(ref node.Item, hit, dist);
 
                     if (!carryOn)
+                    {
                         return true;
+                    }
                 }
-                else {
+                else
+                {
                     if (node.Child1 != Proxy.Free)
+                    {
                         stack.Push(node.Child1);
+                    }
+
                     if (node.Child2 != Proxy.Free)
+                    {
                         stack.Push(node.Child2);
+                    }
                 }
             }
 
             return any;
         }
 
-        public int Height {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => _root == Proxy.Free ? 0 : _nodes[_root].Height;
-        }
-
-        public int MaxBalance {
-            [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-            get {
-                var maxBal = 0;
-
-                for (var i = 0; i < Capacity; ++i) {
-                    ref var node = ref _nodes[i];
-                    if (node.Height <= 1)
-                        continue;
-
-                    ref var child1Node = ref _nodes[node.Child1];
-                    ref var child2Node = ref _nodes[node.Child2];
-
-                    var bal = Math.Abs(child2Node.Height - child1Node.Height);
-                    maxBal = Math.Max(maxBal, bal);
-                }
-
-                return maxBal;
-            }
-        }
-
-        public float AreaRatio {
-            [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-            get {
-                if (_root == Proxy.Free)
-                    return 0;
-
-                ref var rootNode = ref _nodes[_root];
-                var rootPeri = Box2.Perimeter(rootNode.Aabb);
-
-                var totalPeri = 0f;
-
-                for (var i = 0; i < Capacity; ++i) {
-                    ref var node = ref _nodes[i];
-                    if (node.Height < 0)
-                        continue;
-
-                    totalPeri += Box2.Perimeter(node.Aabb);
-                }
-
-                return totalPeri / rootPeri;
-            }
-        }
-
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        public void RebuildOptimal(int free = 0) {
+        public void RebuildOptimal(int free = 0)
+        {
             var proxies = new Proxy[Count + free];
             var count = 0;
 
-            for (var i = 0; i < Capacity; ++i) {
+            for (var i = 0; i < Capacity; ++i)
+            {
                 ref var node = ref _nodes[i];
                 if (node.Height < 0)
+                {
                     continue;
+                }
 
                 var proxy = (Proxy) i;
-                if (node.IsLeaf) {
+                if (node.IsLeaf)
+                {
                     node.Parent = Proxy.Free;
                     proxies[count++] = proxy;
                 }
                 else
+                {
                     FreeNode(proxy);
+                }
             }
 
-            while (count > 1) {
+            while (count > 1)
+            {
                 var minCost = float.MaxValue;
 
                 var iMin = -1;
                 var jMin = -1;
 
-                for (var i = 0; i < count; ++i) {
+                for (var i = 0; i < count; ++i)
+                {
                     ref var aabbI = ref _nodes[proxies[i]].Aabb;
 
-                    for (var j = i + 1; j < count; ++j) {
+                    for (var j = i + 1; j < count; ++j)
+                    {
                         ref var aabbJ = ref _nodes[proxies[j]].Aabb;
 
                         var cost = Box2.Perimeter(Box2.Combine(aabbI, aabbJ));
 
                         if (cost >= minCost)
+                        {
                             continue;
+                        }
 
                         iMin = i;
                         jMin = j;
@@ -588,8 +753,10 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        public void ShiftOrigin(in Vector2 newOrigin) {
-            for (var i = 0; i < Capacity; ++i) {
+        public void ShiftOrigin(in Vector2 newOrigin)
+        {
+            for (var i = 0; i < Capacity; ++i)
+            {
                 ref var node = ref _nodes[i];
                 node.Aabb = new Box2(
                     node.Aabb.BottomLeft - newOrigin,
@@ -599,14 +766,18 @@ namespace Robust.Shared.Physics {
         }
 
         /// <remarks>
-        /// If allocation occurs, references to <see cref="Node">s will be invalid.
+        ///     If allocation occurs, references to <see cref="Node" />s will be invalid.
         /// </remarks>
-        private Proxy AllocateNode() {
-            if (_freeNodes == Proxy.Free) {
+        private Proxy AllocateNode()
+        {
+            if (_freeNodes == Proxy.Free)
+            {
                 var newNodeCap = GrowthFunc(Capacity);
 
                 if (newNodeCap <= Capacity)
+                {
                     throw new InvalidOperationException("Growth function returned invalid new capacity, must be greater than current capacity.");
+                }
 
                 EnsureCapacity(newNodeCap);
             }
@@ -624,9 +795,12 @@ namespace Robust.Shared.Physics {
             return alloc;
         }
 
-        private void EnsureCapacity(int newCapacity) {
+        private void EnsureCapacity(int newCapacity)
+        {
             if (newCapacity <= Capacity)
+            {
                 return;
+            }
 
             var oldNodes = _nodes;
 
@@ -635,7 +809,8 @@ namespace Robust.Shared.Physics {
             Array.Copy(oldNodes, _nodes, Count);
 
             var l = Capacity - 1;
-            for (var i = Count; i < l; ++i) {
+            for (var i = Count; i < l; ++i)
+            {
                 ref var node = ref _nodes[i];
                 node.Parent = (Proxy) (i + 1);
                 node.Height = -1;
@@ -648,7 +823,8 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void FreeNode(Proxy proxy) {
+        private void FreeNode(Proxy proxy)
+        {
             ref var node = ref _nodes[proxy];
             node.Parent = _freeNodes;
             node.Height = -1;
@@ -660,12 +836,14 @@ namespace Robust.Shared.Physics {
         }
 
         [Conditional("DEBUG_DYNAMIC_TREE")]
-        private void Validate() {
+        private void Validate()
+        {
             Validate(_root);
 
             var freeCount = 0;
             var freeIndex = _freeNodes;
-            while (freeIndex != Proxy.Free) {
+            while (freeIndex != Proxy.Free)
+            {
                 Assert(0 <= freeIndex);
                 Assert(freeIndex < Capacity);
                 freeIndex = _nodes[freeIndex].Parent;
@@ -678,18 +856,22 @@ namespace Robust.Shared.Physics {
         }
 
         [Conditional("DEBUG_DYNAMIC_TREE")]
-        private void Validate(Proxy proxy) {
+        private void Validate(Proxy proxy)
+        {
             if (proxy == Proxy.Free) return;
 
             ref var node = ref _nodes[proxy];
 
             if (proxy == _root)
+            {
                 Assert(node.Parent == Proxy.Free);
+            }
 
             var child1 = node.Child1;
             var child2 = node.Child2;
 
-            if (node.IsLeaf) {
+            if (node.IsLeaf)
+            {
                 Assert(child1 == Proxy.Free);
                 Assert(child2 == Proxy.Free);
                 Assert(node.Height == 0);
@@ -722,14 +904,18 @@ namespace Robust.Shared.Physics {
             Validate(child2);
         }
 
-        [Conditional("DEBUG")]
-        private void ValidateHeight(Proxy proxy) {
+        [Conditional("DEBUG_DYNAMIC_TREE")]
+        private void ValidateHeight(Proxy proxy)
+        {
             if (proxy == Proxy.Free)
+            {
                 return;
+            }
 
             ref var node = ref _nodes[proxy];
 
-            if (node.IsLeaf) {
+            if (node.IsLeaf)
+            {
                 Assert(node.Height == 0);
                 return;
             }
@@ -748,8 +934,10 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        private void InsertLeaf(Proxy leaf) {
-            if (_root == Proxy.Free) {
+        private void InsertLeaf(Proxy leaf)
+        {
+            if (_root == Proxy.Free)
+            {
                 _root = leaf;
                 _nodes[_root].Parent = Proxy.Free;
                 return;
@@ -767,7 +955,8 @@ namespace Robust.Shared.Physics {
 #if DEBUG
             var loopCount = 0;
 #endif
-            for (;;) {
+            for (;;)
+            {
 #if DEBUG
                 Assert(loopCount++ < Capacity * 2);
 #endif
@@ -792,47 +981,13 @@ namespace Robust.Shared.Physics {
                 var cost = 2 * combinedPeri;
                 var inheritCost = 2 * (combinedPeri - indexPeri);
 
-                /*
-                var aabb1 = Box2.Combine(leafAabb, child1Node.AABB);
-                var aabb1Peri = Box2.Perimeter(aabb1);
-                var cost1 = inheritCost
-                    + (child1Node.IsLeaf
-                        ? aabb1Peri
-                        : aabb1Peri - Box2.Perimeter(child1Node.AABB));
-
-                var aabb2 = Box2.Combine(leafAabb, child2Node.AABB);
-                var aabb2Peri = Box2.Perimeter(aabb2);
-                var cost2 = inheritCost
-                    + (child2Node.IsLeaf
-                        ? aabb2Peri
-                        : aabb2Peri - Box2.Perimeter(child2Node.AABB));
-                */
-                float cost1, cost2;
-
-                if (child1Node.IsLeaf) {
-                    var aabb = Box2.Combine(leafAabb, child1Node.Aabb);
-                    cost1 = Box2.Perimeter(aabb) + inheritCost;
-                }
-                else {
-                    var aabb = Box2.Combine(leafAabb, child1Node.Aabb);
-                    var oldPeri = Box2.Perimeter(child1Node.Aabb);
-                    var newPeri = Box2.Perimeter(aabb);
-                    cost1 = (newPeri - oldPeri) + inheritCost;
-                }
-
-                if (child2Node.IsLeaf) {
-                    var aabb = Box2.Combine(leafAabb, child2Node.Aabb);
-                    cost2 = Box2.Perimeter(aabb) + inheritCost;
-                }
-                else {
-                    var aabb = Box2.Combine(leafAabb, child2Node.Aabb);
-                    var oldPeri = Box2.Perimeter(child2Node.Aabb);
-                    var newPeri = Box2.Perimeter(aabb);
-                    cost2 = (newPeri - oldPeri) + inheritCost;
-                }
+                var cost1 = EstimateCost(leafAabb, child1Node) + inheritCost;
+                var cost2 = EstimateCost(leafAabb, child2Node) + inheritCost;
 
                 if (cost < cost1 && cost < cost2)
+                {
                     break;
+                }
 
                 index = cost1 < cost2 ? child1 : child2;
             }
@@ -850,20 +1005,26 @@ namespace Robust.Shared.Physics {
             newParentNode.Height = 1 + siblingNode.Height;
 
             ref var proxyNode = ref _nodes[leaf];
-            if (oldParent != Proxy.Free) {
+            if (oldParent != Proxy.Free)
+            {
                 ref var oldParentNode = ref _nodes[oldParent];
 
                 if (oldParentNode.Child1 == sibling)
+                {
                     oldParentNode.Child1 = newParent;
+                }
                 else
+                {
                     oldParentNode.Child2 = newParent;
+                }
 
                 newParentNode.Child1 = sibling;
                 newParentNode.Child2 = leaf;
                 siblingNode.Parent = newParent;
                 proxyNode.Parent = newParent;
             }
-            else {
+            else
+            {
                 newParentNode.Child1 = sibling;
                 newParentNode.Child2 = leaf;
                 siblingNode.Parent = newParent;
@@ -875,8 +1036,10 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        private void RemoveLeaf(Proxy leaf) {
-            if (leaf == _root) {
+        private void RemoveLeaf(Proxy leaf)
+        {
+            if (leaf == _root)
+            {
                 _root = Proxy.Free;
                 return;
             }
@@ -895,7 +1058,8 @@ namespace Robust.Shared.Physics {
                 : parentNode.Child1;
             ref var siblingNode = ref _nodes[sibling];
 
-            if (grandParent == Proxy.Free) {
+            if (grandParent == Proxy.Free)
+            {
                 _root = Proxy.Free;
                 siblingNode.Parent = Proxy.Free;
                 FreeNode(parent);
@@ -904,9 +1068,14 @@ namespace Robust.Shared.Physics {
 
             ref var grandParentNode = ref _nodes[grandParent];
             if (grandParentNode.Child1 == parent)
+            {
                 grandParentNode.Child1 = sibling;
+            }
             else
+            {
                 grandParentNode.Child2 = sibling;
+            }
+
             siblingNode.Parent = grandParent;
             FreeNode(parent);
 
@@ -914,8 +1083,10 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        private void Balance(Proxy index) {
-            while (index != Proxy.Free) {
+        private void Balance(Proxy index)
+        {
+            while (index != Proxy.Free)
+            {
                 index = BalanceStep(index);
 
                 ref var indexNode = ref _nodes[index];
@@ -939,11 +1110,14 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private Proxy BalanceStep(Proxy iA) {
+        private Proxy BalanceStep(Proxy iA)
+        {
             ref var a = ref _nodes[iA];
 
             if (a.IsLeaf || a.Height < 2)
+            {
                 return iA;
+            }
 
             var iB = a.Child1;
             var iC = a.Child2;
@@ -957,7 +1131,8 @@ namespace Robust.Shared.Physics {
             var balance = c.Height - b.Height;
 
             // Rotate C up
-            if (balance > 1) {
+            if (balance > 1)
+            {
                 var iF = c.Child1;
                 var iG = c.Child2;
                 Assert(iC != iF);
@@ -975,19 +1150,26 @@ namespace Robust.Shared.Physics {
                 a.Parent = iC;
 
                 if (c.Parent == Proxy.Free)
+                {
                     _root = iC;
-                else {
+                }
+                else
+                {
                     ref var cParent = ref _nodes[c.Parent];
                     if (cParent.Child1 == iA)
+                    {
                         cParent.Child1 = iC;
-                    else {
+                    }
+                    else
+                    {
                         Assert(cParent.Child2 == iA);
                         cParent.Child2 = iC;
                     }
                 }
 
                 // Rotate
-                if (f.Height > g.Height) {
+                if (f.Height > g.Height)
+                {
                     c.Child2 = iF;
                     a.Child2 = iG;
                     g.Parent = iA;
@@ -997,7 +1179,8 @@ namespace Robust.Shared.Physics {
                     a.Height = Math.Max(b.Height, g.Height) + 1;
                     c.Height = Math.Max(a.Height, f.Height) + 1;
                 }
-                else {
+                else
+                {
                     c.Child2 = iG;
                     a.Child2 = iF;
                     f.Parent = iA;
@@ -1012,7 +1195,8 @@ namespace Robust.Shared.Physics {
             }
 
             // Rotate B up
-            if (balance < -1) {
+            if (balance < -1)
+            {
                 var iD = b.Child1;
                 var iE = b.Child2;
                 Assert(iB != iD);
@@ -1030,19 +1214,26 @@ namespace Robust.Shared.Physics {
                 a.Parent = iB;
 
                 if (b.Parent == Proxy.Free)
+                {
                     _root = iB;
-                else {
+                }
+                else
+                {
                     ref var bParent = ref _nodes[b.Parent];
                     if (bParent.Child1 == iA)
+                    {
                         bParent.Child1 = iB;
-                    else {
+                    }
+                    else
+                    {
                         Assert(bParent.Child2 == iA);
                         bParent.Child2 = iB;
                     }
                 }
 
                 // Rotate
-                if (d.Height > e.Height) {
+                if (d.Height > e.Height)
+                {
                     b.Child2 = iD;
                     a.Child1 = iE;
                     e.Parent = iA;
@@ -1052,7 +1243,8 @@ namespace Robust.Shared.Physics {
                     a.Height = Math.Max(c.Height, e.Height) + 1;
                     b.Height = Math.Max(a.Height, d.Height) + 1;
                 }
-                else {
+                else
+                {
                     b.Child2 = iE;
                     a.Child1 = iD;
                     d.Parent = iA;
@@ -1070,14 +1262,35 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private float EstimateCost(in Box2 baseAabb, in Node node)
+        {
+            var cost = Box2.Perimeter(
+                Box2.Combine(
+                    baseAabb,
+                    node.Aabb
+                )
+            );
+
+            if (!node.IsLeaf)
+            {
+                cost -= Box2.Perimeter(node.Aabb);
+            }
+
+            return cost;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int ComputeHeight()
             => ComputeHeight(_root);
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.NoInlining)]
-        private int ComputeHeight(Proxy proxy) {
+        private int ComputeHeight(Proxy proxy)
+        {
             ref var node = ref _nodes[proxy];
             if (node.IsLeaf)
+            {
                 return 0;
+            }
 
             return Math.Max(
                 ComputeHeight(node.Child1),
@@ -1086,46 +1299,25 @@ namespace Robust.Shared.Physics {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void AddOrUpdate(T item) {
+        public void AddOrUpdate(T item)
+        {
             if (!Update(item))
+            {
                 Add(item);
+            }
         }
 
-        [Conditional("DEBUG")]
-        [DebuggerNonUserCode, DebuggerHidden, DebuggerStepThrough]
+        [Conditional("DEBUG_DYNAMIC_TREE")]
+        [DebuggerNonUserCode] [DebuggerHidden] [DebuggerStepThrough]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void Assert(bool assertion, [CallerMemberName]string member = default, [CallerFilePath] string file = default, [CallerLineNumber] int line = default) {
+        public static void Assert(bool assertion, [CallerMemberName] string member = default, [CallerFilePath] string file = default, [CallerLineNumber] int line = default)
+        {
             if (assertion) return;
 
             var msg = $"Assertion failure in {member} ({file}:{line})";
             Debug.Print(msg);
             Debugger.Break();
             throw new InvalidOperationException(msg);
-        }
-
-        public string DebuggerDisplay
-            => $"Count = {Count}, Capacity = {Capacity}, Height = {Height}";
-
-        private IEnumerable<(Proxy, Node)> DebugAllocatedNodesEnumerable {
-            get {
-                for (var i = 0; i < _nodes.Length; i++) {
-                    var node = _nodes[i];
-                    if (!node.IsFree)
-                        yield return ((Proxy) i, node);
-                }
-            }
-        }
-
-        [DebuggerBrowsable(DebuggerBrowsableState.RootHidden)]
-        private (Proxy, Node)[] DebugAllocatedNodes {
-            get {
-                var data = new (Proxy, Node)[Count];
-                var i = 0;
-                foreach (var x in DebugAllocatedNodesEnumerable)
-                    data[i++] = x;
-
-                return data;
-            }
         }
 
     }

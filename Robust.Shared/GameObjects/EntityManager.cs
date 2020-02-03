@@ -45,14 +45,14 @@ namespace Robust.Shared.GameObjects
         /// <summary>
         /// All entities currently stored in the manager, also used for iteration.
         /// </summary>
-        protected readonly ConcurrentDictionary<EntityUid, IEntity> Entities
-            = new ConcurrentDictionary<EntityUid, IEntity>();
+        protected readonly ConcurrentDictionary<EntityUid, IEntity> Entities =
+            new ConcurrentDictionary<EntityUid, IEntity>();
 
         /// <summary>
         /// All entities organized by map and location.
         /// </summary>
-        protected readonly ConcurrentDictionary<MapId, DynamicTree<IEntity>> MapEntityTrees
-            = new ConcurrentDictionary<MapId, DynamicTree<IEntity>>();
+        protected readonly ConcurrentDictionary<MapId, DynamicTree<IEntity>> MapEntityTrees =
+            new ConcurrentDictionary<MapId, DynamicTree<IEntity>>();
 
         private DynamicTree<IEntity> EntityTreeFactory()
         {
@@ -275,9 +275,12 @@ namespace Robust.Shared.GameObjects
         public DynamicTree<IEntity> GetEntityTreeForMap(MapId mapId)
             => MapEntityTrees.GetOrAdd(mapId, _ => EntityTreeFactory());
 
-        public void RemoveFromEntityTree(IEntity entity) {
-            foreach ( var mapId in _mapManager.GetAllMapIds())
+        public void RemoveFromEntityTree(IEntity entity)
+        {
+            foreach (var mapId in _mapManager.GetAllMapIds())
+            {
                 GetEntityTreeForMap(mapId).Remove(entity);
+            }
         }
 
         /// <summary>
@@ -428,8 +431,12 @@ namespace Robust.Shared.GameObjects
         public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 box)
         {
             foreach (var ent in GetEntityTreeForMap(mapId).Query(box))
+            {
                 if (!ent.Deleted)
+                {
                     yield return ent;
+                }
+            }
         }
 
         /// <inheritdoc />
@@ -475,7 +482,7 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public IEnumerable<IEntity> GetEntitiesInRange(MapId mapId, Box2 box, float range)
         {
-            var aabb = new Box2(box.Left - range, box.Bottom - range, box.Right + range, box.Top + range);
+            var aabb = Box2.Grow(box, range);
             return GetEntitiesIntersecting(mapId, aabb);
         }
 
