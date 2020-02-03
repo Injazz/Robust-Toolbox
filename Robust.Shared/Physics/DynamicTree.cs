@@ -1075,11 +1075,10 @@ namespace Robust.Shared.Physics {
         [Conditional("DEBUG")]
         [DebuggerNonUserCode, DebuggerHidden, DebuggerStepThrough]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void Assert(bool assertion) {
+        public static void Assert(bool assertion, [CallerMemberName]string member = default, [CallerFilePath] string file = default, [CallerLineNumber] int line = default) {
             if (assertion) return;
 
-            var sf = new StackFrame(1, true);
-            var msg = $"Assertion failure in {sf.GetMethod().Name} ({sf.GetFileName()}:{sf.GetFileLineNumber()})";
+            var msg = $"Assertion failure in {member} ({file}:{line})";
             Debug.Print(msg);
             Debugger.Break();
             throw new InvalidOperationException(msg);
