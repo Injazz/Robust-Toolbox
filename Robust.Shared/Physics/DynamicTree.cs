@@ -544,10 +544,10 @@ namespace Robust.Shared.Physics {
                 var child1 = proxies[iMin];
                 var child2 = proxies[jMin];
 
+                var parent = AllocateNode();
+
                 ref var child1Node = ref _nodes[child1];
                 ref var child2Node = ref _nodes[child2];
-
-                var parent = AllocateNode();
                 ref var parentNode = ref _nodes[parent];
 
                 parentNode.Child1 = child1;
@@ -580,6 +580,9 @@ namespace Robust.Shared.Physics {
             }
         }
 
+        /// <remarks>
+        /// If allocation occurs, references to <see cref="Node">s will be invalid.
+        /// </remarks>
         private Proxy AllocateNode() {
             if (_freeNodes == Proxy.Free) {
                 var newNodeCap = GrowthFunc(Capacity);
@@ -588,12 +591,13 @@ namespace Robust.Shared.Physics {
                     throw new InvalidOperationException("Growth function returned invalid new capacity, must be greater than current capacity.");
 
                 EnsureCapacity(newNodeCap);
-                Validate();
             }
 
             var alloc = _freeNodes;
             ref var allocNode = ref _nodes[alloc];
+            Assert(allocNode.IsFree);
             _freeNodes = allocNode.Parent;
+            Assert(_nodes[_freeNodes].IsFree);
             allocNode.Parent = Proxy.Free;
             allocNode.Child1 = Proxy.Free;
             allocNode.Child2 = Proxy.Free;
@@ -611,13 +615,12 @@ namespace Robust.Shared.Physics {
             _nodes = new Node[newCapacity];
 
             Array.Copy(oldNodes, _nodes, Count);
-            Array.Clear(oldNodes, 0, oldNodes.Length);
 
             var l = Capacity - 1;
             for (var i = Count; i < l; ++i) {
                 ref var node = ref _nodes[i];
                 node.Parent = (Proxy) (i + 1);
-                node.Height = i;
+                node.Height = -1;
             }
 
             ref var lastNode = ref _nodes[l];
@@ -638,7 +641,7 @@ namespace Robust.Shared.Physics {
             --Count;
         }
 
-        [Conditional("DEBUG")]
+        [Conditional("DEBUG_DYNAMIC_TREE")]
         private void Validate() {
             Validate(_root);
 
@@ -656,7 +659,7 @@ namespace Robust.Shared.Physics {
             Assert(Count + freeCount == Capacity);
         }
 
-        [Conditional("DEBUG")]
+        [Conditional("DEBUG_DYNAMIC_TREE")]
         private void Validate(Proxy proxy) {
             if (proxy == Proxy.Free) return;
 
@@ -816,15 +819,13 @@ namespace Robust.Shared.Physics {
                 index = cost1 < cost2 ? child1 : child2;
             }
 
+            var newParent = AllocateNode();
+
             var sibling = index;
             ref var siblingNode = ref _nodes[sibling];
 
             var oldParent = siblingNode.Parent;
 
-            //Validate(); // verify tree valid
-            // tree is not touched above this point
-
-            var newParent = AllocateNode();
             ref var newParentNode = ref _nodes[newParent];
             newParentNode.Parent = oldParent;
             newParentNode.Aabb = Box2.Combine(leafAabb, siblingNode.Aabb);
@@ -1025,7 +1026,7 @@ namespace Robust.Shared.Physics {
                 // Rotate
                 if (d.Height > e.Height) {
                     b.Child2 = iD;
-                    a.Child2 = iE;
+                    a.Child1 = iE;
                     e.Parent = iA;
                     a.Aabb = Box2.Combine(c.Aabb, e.Aabb);
                     b.Aabb = Box2.Combine(a.Aabb, d.Aabb);
@@ -1035,7 +1036,7 @@ namespace Robust.Shared.Physics {
                 }
                 else {
                     b.Child2 = iE;
-                    a.Child2 = iD;
+                    a.Child1 = iD;
                     d.Parent = iA;
                     a.Aabb = Box2.Combine(c.Aabb, d.Aabb);
                     b.Aabb = Box2.Combine(a.Aabb, e.Aabb);

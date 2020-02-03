@@ -29,13 +29,13 @@ namespace Robust.Shared.Physics {
             }
 
             public override string ToString()
-                => IsLeaf
+                => $"Parent: {(Parent == Proxy.Free ? "None" : Parent.ToString())}, " +(IsLeaf
                     ? Height != 0
                         ? $"Leaf (invalid height of {Height}): {Item}"
                         : $"Leaf: {Item}"
                     : IsFree
                         ? "Free"
-                        : $"Branch at height {Height}, children: {Child1} and {Child2}";
+                        : $"Branch at height {Height}, children: {Child1} and {Child2}");
 
         }
 

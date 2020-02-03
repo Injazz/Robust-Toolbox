@@ -64,6 +64,8 @@ namespace Robust.Shared.GameObjects
                     => ent.TryGetComponent<ICollidableComponent>(out var collider)
                         ? collider.WorldAABB
                         : new Box2(ent.Transform.WorldPosition, ent.Transform.WorldPosition)
+                ,capacity: 16 // TODO: temporarily small, should be large enough to contain an average map's start-up entities
+                ,growthFunc: x => x + 2 // TODO: probably should be logarithmic
             );
         }
 
