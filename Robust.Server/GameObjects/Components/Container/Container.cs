@@ -68,6 +68,9 @@ namespace Robust.Server.GameObjects.Components.Container
     /// </summary>
     public abstract class BaseContainer : IContainer
     {
+
+        private bool _showContents;
+
         /// <inheritdoc />
         public IContainerManager Manager { get; private set; }
 
@@ -87,7 +90,17 @@ namespace Robust.Server.GameObjects.Components.Container
         public abstract IReadOnlyCollection<IEntity> ContainedEntities { get; }
 
         /// <inheritdoc />
-        public bool ShowContents { get; set; }
+        public bool ShowContents {
+            get => _showContents;
+            set {
+                _showContents = value;
+
+                foreach (var entity in ContainedEntities)
+                {
+                    entity.IsInClosedContainer = !value;
+                }
+            }
+        }
 
         /// <summary>
         /// DO NOT CALL THIS METHOD DIRECTLY!
@@ -127,6 +140,10 @@ namespace Robust.Server.GameObjects.Components.Container
             // spatially move the object to the location of the container. If you don't want this functionality, the
             // calling code can save the local position before calling this function, and apply it afterwords.
             transform.LocalPosition = Vector2.Zero;
+
+            toinsert.ContainingEntity = Owner.Uid;
+
+            toinsert.IsInClosedContainer = !ShowContents;
 
             return true;
         }
@@ -177,6 +194,9 @@ namespace Robust.Server.GameObjects.Components.Container
                 return true;
 
             toremove.Transform.DetachParent();
+
+            toremove.ContainingEntity = null;
+
             return true;
         }
 

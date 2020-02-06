@@ -118,7 +118,7 @@ namespace Robust.Shared.Interfaces.GameObjects
 
         #region Spatial Queries
 
-        IEnumerable<IEntity> GetEntitiesAt(MapId mapId, Vector2 position);
+        IEnumerable<IEntity> GetEntitiesAt(MapId mapId, Vector2 position, bool skipContained = false);
 
         /// <summary>
         /// Checks if any entity is intersecting the box
@@ -132,45 +132,45 @@ namespace Robust.Shared.Interfaces.GameObjects
         /// </summary>
         /// <param name="mapId"></param>
         /// <param name="position"></param>
-        IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 position);
+        IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 position, bool skipContained = false);
 
         /// <summary>
         /// Gets entities with a bounding box that intersects this point
         /// </summary>
         /// <param name="mapId"></param>
         /// <param name="position"></param>
-        IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position);
+        IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position, bool skipContained = false);
 
         /// <summary>
         /// Gets entities with a bounding box that intersects this point
         /// </summary>
         /// <param name="position"></param>
-        IEnumerable<IEntity> GetEntitiesIntersecting(MapCoordinates position);
+        IEnumerable<IEntity> GetEntitiesIntersecting(MapCoordinates position, bool skipContained = false);
 
         /// <summary>
         /// Gets entities with a bounding box that intersects this point in coordinate form
         /// </summary>
         /// <param name="position"></param>
-        IEnumerable<IEntity> GetEntitiesIntersecting(GridCoordinates position);
+        IEnumerable<IEntity> GetEntitiesIntersecting(GridCoordinates position, bool skipContained = false);
 
         /// <summary>
         /// Gets entities that intersect with this entity
         /// </summary>
-        IEnumerable<IEntity> GetEntitiesIntersecting(IEntity entity);
+        IEnumerable<IEntity> GetEntitiesIntersecting(IEntity entity, bool skipContained = false);
 
         /// <summary>
         /// Gets entities within a certain *square* range of this local coordinate
         /// </summary>
         /// <param name="position"></param>
         /// <param name="range"></param>
-        IEnumerable<IEntity> GetEntitiesInRange(GridCoordinates position, float range);
+        IEnumerable<IEntity> GetEntitiesInRange(GridCoordinates position, float range, bool skipContained = false);
 
         /// <summary>
         /// Gets entities within a certain *square* range of this entity
         /// </summary>
         /// <param name="entity"></param>
         /// <param name="range"></param>
-        IEnumerable<IEntity> GetEntitiesInRange(IEntity entity, float range);
+        IEnumerable<IEntity> GetEntitiesInRange(IEntity entity, float range, bool skipContained = false);
 
         /// <summary>
         /// Gets entities within a certain *square* range of this bounding box
@@ -178,7 +178,7 @@ namespace Robust.Shared.Interfaces.GameObjects
         /// <param name="mapID"></param>
         /// <param name="box"></param>
         /// <param name="range"></param>
-        IEnumerable<IEntity> GetEntitiesInRange(MapId mapID, Box2 box, float range);
+        IEnumerable<IEntity> GetEntitiesInRange(MapId mapID, Box2 box, float range, bool skipContained = false);
 
         /// <summary>
         /// Get entities with bounding box in range of this whose center is within a certain directional arc, angle specifies center bisector of arc
@@ -188,8 +188,10 @@ namespace Robust.Shared.Interfaces.GameObjects
         /// <param name="direction"></param>
         /// <param name="arcWidth"></param>
         /// <returns></returns>
-        IEnumerable<IEntity> GetEntitiesInArc(GridCoordinates coordinates, float range, Angle direction, float arcWidth);
+        IEnumerable<IEntity> GetEntitiesInArc(GridCoordinates coordinates, float range, Angle direction, float arcWidth, bool skipContained = false);
 
+
+        IEnumerable<IEntity> GetEntitiesInMap(MapId mapId, bool skipContained = false);
         #endregion
 
         #region Spatial Updates

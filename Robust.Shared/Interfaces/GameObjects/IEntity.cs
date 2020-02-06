@@ -67,6 +67,10 @@ namespace Robust.Shared.Interfaces.GameObjects
         /// </summary>
         IMetaDataComponent MetaData { get; }
 
+        bool IsInClosedContainer { get; set; }
+
+        EntityUid? ContainingEntity { get; set; }
+
         /// <summary>
         ///     Public method to add a component to an entity.
         ///     Calls the component's onAdd method, which also adds it to the component manager.

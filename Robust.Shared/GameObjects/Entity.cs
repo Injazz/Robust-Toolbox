@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Robust.Shared.GameObjects.Components;
@@ -83,6 +83,16 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         [ViewVariables]
         public IMetaDataComponent MetaData => _metaData ?? (_metaData = GetComponent<IMetaDataComponent>());
+
+
+        private bool _isInClosedContainer;
+
+        public bool IsInClosedContainer {
+            get => ContainingEntity != null && _isInClosedContainer;
+            set => _isInClosedContainer = value;
+        }
+
+        public EntityUid? ContainingEntity { get; set; }
 
         #endregion Members
 

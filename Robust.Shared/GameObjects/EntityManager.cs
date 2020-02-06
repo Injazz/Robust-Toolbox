@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -146,14 +146,32 @@ namespace Robust.Shared.GameObjects
             return query.Match(this);
         }
 
-        public IEnumerable<IEntity> GetEntitiesAt(MapId mapId, Vector2 position)
+        public IEnumerable<IEntity> GetEntitiesAt(MapId mapId, Vector2 position, bool skipContained)
         {
             foreach (var entity in _entityTreesPerMap[mapId].Query(position))
             {
+
+                if (skipContained && entity.IsInClosedContainer)
+                {
+                    continue;
+                }
+
                 var transform = entity.Transform;
+
                 if (FloatMath.CloseTo(transform.GridPosition.X, position.X) && FloatMath.CloseTo(transform.GridPosition.Y, position.Y))
                 {
+
                     yield return entity;
+
+                    if (skipContained)
+                    {
+                        continue;
+                    }
+
+                    foreach (var containedEntity in GetContainedEntities(entity))
+                    {
+                        yield return containedEntity;
+                    }
                 }
             }
         }
@@ -403,8 +421,20 @@ namespace Robust.Shared.GameObjects
             return any;
         }
 
+        private bool IsInClosedContainer(IEntity entity) {
+            var transform = entity.Transform;
+            var parentTxf = transform.Parent;
+            if (parentTxf == null)
+                return false;
+
+            var parentEntity = parentTxf.Owner;
+            return parentEntity.TryGetComponent(out IContainerManager cmc)
+                && cmc.TryGetContainer(entity, out var ctr)
+                && !ctr.ShowContents;
+        }
+
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 position) {
+        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 position, bool skipContained = false) {
 
             var newResults = _entityTreesPerMap[mapId].Query(position); // .ToArray();
 
@@ -415,16 +445,41 @@ namespace Robust.Shared.GameObjects
                     continue;
                 }
 
+                if (skipContained && entity.IsInClosedContainer)
+                {
+                    continue;
+                }
+
                 yield return entity;
+
+                if (skipContained)
+                {
+                    continue;
+                }
+
+                foreach (var containedEntity in GetContainedEntities(entity))
+                {
+                    yield return containedEntity;
+                }
+            }
+        }
+
+        private static IEnumerable<IEntity> GetContainedEntities(IEntity entity) {
+            if (!entity.TryGetComponent(out IContainerManager cmc) || !cmc.TryGetContainer(entity, out var container))
+            {
+                yield break;
+            }
+
+            foreach (var contained in container.ContainedEntities)
+            {
+                yield return contained;
             }
         }
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position) {
-            const float range = .00001f / 2;
-            var aabb = new Box2(position, position).Enlarged(range);
+        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position, bool skipContained = false) {
 
-            var newResults = _entityTreesPerMap[mapId].Query(aabb).ToArray();
+            var newResults = _entityTreesPerMap[mapId].Query(position).ToArray();
 
 
             foreach (var entity in newResults)
@@ -432,8 +487,26 @@ namespace Robust.Shared.GameObjects
 
                 if (entity.TryGetComponent(out ICollidableComponent component))
                 {
+                    if (skipContained && entity.IsInClosedContainer)
+                    {
+                        continue;
+                    }
+
                     if (component.WorldAABB.Contains(position))
+                    {
+
                         yield return entity;
+
+                        if (skipContained)
+                        {
+                            continue;
+                }
+
+                        foreach (var containedEntity in GetContainedEntities(entity))
+                        {
+                            yield return containedEntity;
+                        }
+                    }
                 }
                 else
                 {
@@ -443,73 +516,113 @@ namespace Robust.Shared.GameObjects
                         && FloatMath.CloseTo(entPos.Y, position.Y))
                     {
                         yield return entity;
+
+                        if (skipContained)
+                        {
+                            continue;
                     }
+
+                        foreach (var containedEntity in GetContainedEntities(entity))
+                        {
+                            yield return containedEntity;
                 }
             }
         }
-
-        /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapCoordinates position)
-        {
-            return GetEntitiesIntersecting(position.MapId, position.Position);
+            }
         }
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesIntersecting(GridCoordinates position)
+        public IEnumerable<IEntity> GetEntitiesIntersecting(MapCoordinates position, bool skipContained = false)
+        {
+            return GetEntitiesIntersecting(position.MapId, position.Position, skipContained);
+        }
+
+        /// <inheritdoc />
+        public IEnumerable<IEntity> GetEntitiesIntersecting(GridCoordinates position, bool skipContained = false)
         {
             var mapPos = position.ToMap(_mapManager);
-            return GetEntitiesIntersecting(mapPos.MapId, mapPos.Position);
+            return GetEntitiesIntersecting(mapPos.MapId, mapPos.Position, skipContained);
         }
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesIntersecting(IEntity entity)
+        public IEnumerable<IEntity> GetEntitiesIntersecting(IEntity entity, bool skipContained = false)
         {
             if (entity.TryGetComponent<ICollidableComponent>(out var component))
             {
-                return GetEntitiesIntersecting(entity.Transform.MapID, component.WorldAABB);
+                return GetEntitiesIntersecting(entity.Transform.MapID, component.WorldAABB, skipContained);
             }
 
-            return GetEntitiesIntersecting(entity.Transform.GridPosition);
+            return GetEntitiesIntersecting(entity.Transform.GridPosition, skipContained);
         }
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesInRange(GridCoordinates position, float range)
+        public IEnumerable<IEntity> GetEntitiesInRange(GridCoordinates position, float range, bool skipContained = false)
         {
-            var aabb = new Box2(position.Position - new Vector2(range / 2, range / 2), position.Position + new Vector2(range / 2, range / 2));
-            return GetEntitiesIntersecting(_mapManager.GetGrid(position.GridID).ParentMapId, aabb);
+            var aabb =  new Box2(
+                position.Position - new Vector2(range / 2, range / 2),
+                position.Position + new Vector2(range / 2, range / 2)
+            );
+            return GetEntitiesIntersecting(_mapManager.GetGrid(position.GridID).ParentMapId, aabb, skipContained);
         }
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesInRange(MapId mapId, Box2 box, float range)
+        public IEnumerable<IEntity> GetEntitiesInRange(MapId mapId, Box2 box, float range, bool skipContained = false)
         {
             var aabb = box.Enlarged(range);
             return GetEntitiesIntersecting(mapId, aabb);
         }
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesInRange(IEntity entity, float range)
+        public IEnumerable<IEntity> GetEntitiesInRange(IEntity entity, float range, bool skipContained = false)
         {
             if (entity.TryGetComponent<ICollidableComponent>(out var component))
             {
-                return GetEntitiesInRange(entity.Transform.MapID, component.WorldAABB, range);
+                return GetEntitiesInRange(entity.Transform.MapID, component.WorldAABB, range, skipContained);
             }
             else
             {
                 GridCoordinates coords = entity.Transform.GridPosition;
-                return GetEntitiesInRange(coords, range);
+                return GetEntitiesInRange(coords, range, skipContained);
             }
         }
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesInArc(GridCoordinates coordinates, float range, Angle direction, float arcWidth)
+        public IEnumerable<IEntity> GetEntitiesInArc(GridCoordinates coordinates, float range, Angle direction, float arcWidth, bool skipContained = false)
         {
             var position = coordinates.ToMap(_mapManager).Position;
 
-            foreach (var entity in GetEntitiesInRange(coordinates, range*2))
+            foreach (var entity in GetEntitiesInRange(coordinates, range*2, skipContained))
             {
                 var angle = new Angle(entity.Transform.WorldPosition - position);
                 if (angle.Degrees < direction.Degrees + arcWidth / 2 && angle.Degrees > direction.Degrees - arcWidth / 2)
                     yield return entity;
+            }
+        }
+
+        public IEnumerable<IEntity> GetEntitiesInMap(MapId mapId, bool skipContained = false) {
+            foreach (var entity in _entityTreesPerMap[mapId])
+            {
+                if (entity.Deleted)
+                {
+                    continue;
+                }
+
+                if (skipContained && entity.IsInClosedContainer)
+                {
+                    continue;
+                }
+
+                yield return entity;
+
+                if (skipContained)
+                {
+                    continue;
+                }
+
+                foreach (var containedEntity in GetContainedEntities(entity))
+                {
+                    yield return containedEntity;
+                }
             }
         }
 
@@ -523,7 +636,7 @@ namespace Robust.Shared.GameObjects
 
         public bool UpdateEntityTree(IEntity entity) {
 
-            if (entity.Deleted)
+            if (entity.Deleted || entity.IsInClosedContainer)
             {
                 RemoveFromEntityTrees(entity);
                 return true;
