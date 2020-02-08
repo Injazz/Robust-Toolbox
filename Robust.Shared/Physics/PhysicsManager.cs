@@ -254,7 +254,6 @@ namespace Robust.Shared.Physics
             var results = new SortedList<float,RayCastResults>(8);
 
             this[mapId].Query((ref IPhysBody body, in Vector2 point, float distFromOrigin) => {
-                Debug.WriteLine(body.ToString());
 
                 if (distFromOrigin > maxLength)
                 {
