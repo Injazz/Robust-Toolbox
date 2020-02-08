@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Robust.Shared.GameObjects.Components;
 using Robust.Shared.Interfaces.GameObjects;
@@ -249,28 +251,42 @@ namespace Robust.Shared.Physics
 
         /// <inheritdoc />
         public RayCastResults IntersectRay(MapId mapId, CollisionRay ray, float maxLength = 50, IEntity ignoredEnt = null) {
-            RayCastResults results = default;
+            var results = new SortedList<float,RayCastResults>(8);
 
             this[mapId].Query((ref IPhysBody body, in Vector2 point, float distFromOrigin) => {
+                Debug.WriteLine(body.ToString());
+
                 if (distFromOrigin > maxLength)
+                {
                     return false;
+                }
 
                 if (body.Owner == ignoredEnt)
+                {
                     return false;
+                }
 
                 if (!body.CollisionEnabled)
+                {
                     return true;
+                }
 
                 if ((body.CollisionLayer & ray.CollisionMask) == 0x0)
+                {
                     return true;
+                }
 
-                results = new RayCastResults(distFromOrigin, point, body.Owner);
+                results.Add(distFromOrigin, new RayCastResults(distFromOrigin, point, body.Owner));
 
-                return false;
+                return true;
             }, ray.Position, ray.Direction);
 
-            DebugDrawRay?.Invoke(new DebugRayData(ray, maxLength, results));
-            return results;
+            foreach (var result in results.Values)
+            {
+                DebugDrawRay?.Invoke(new DebugRayData(ray, maxLength, result));
+            }
+
+            return results.Values.FirstOrDefault();
         }
 
         public event Action<DebugRayData> DebugDrawRay;
