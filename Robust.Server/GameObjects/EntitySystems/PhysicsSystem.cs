@@ -40,8 +40,14 @@ namespace Robust.Server.GameObjects.EntitySystems
 
         private void SimulateWorld(float frameTime, IEnumerable<IEntity> entities)
         {
+            // simulation can introduce deleted entities into the query results
             foreach (var entity in entities)
             {
+                if (entity.Deleted)
+                {
+                    continue;
+                }
+
                 if (_pauseManager.IsEntityPaused(entity))
                 {
                     continue;
@@ -52,6 +58,11 @@ namespace Robust.Server.GameObjects.EntitySystems
 
             foreach (var entity in entities)
             {
+                if (entity.Deleted)
+                {
+                    continue;
+                }
+
                 DoMovement(entity, frameTime);
             }
         }
