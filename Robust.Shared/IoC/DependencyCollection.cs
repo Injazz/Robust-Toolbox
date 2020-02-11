@@ -35,10 +35,15 @@ namespace Robust.Shared.IoC
         public void Register<TInterface, TImplementation>(bool overwrite = false)
             where TImplementation : class, TInterface, new()
         {
-            var interfaceType = typeof(TInterface);
-            CheckRegisterInterface(interfaceType, typeof(TImplementation), overwrite);
+            Register(typeof(TInterface), typeof(TImplementation), overwrite);
+        }
 
-            _resolveTypes[interfaceType] = typeof(TImplementation);
+        /// <inheritdoc />
+        public void Register(Type interfaceType, Type implementation, bool overwrite = false)
+        {
+            CheckRegisterInterface(interfaceType, implementation, overwrite);
+
+            _resolveTypes[interfaceType] = implementation;
         }
 
         [AssertionMethod]

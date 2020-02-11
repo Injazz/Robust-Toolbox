@@ -9,6 +9,10 @@ using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Text;
 using Robust.Shared.Interfaces.Serialization;
+using Robust.Shared.IoC;
+using Robust.Shared.Serialization;
+
+[module:IoCRegister(typeof(IRobustSerializer), typeof(RobustSerializer))]
 
 namespace Robust.Shared.Serialization
 {

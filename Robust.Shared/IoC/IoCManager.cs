@@ -1,6 +1,10 @@
 ﻿using Robust.Shared.IoC.Exceptions;
 using System;
 using System.Diagnostics.Contracts;
+using System.IO;
+using System.Linq.Expressions;
+using System.Reflection;
+using System.Runtime.Loader;
 using System.Threading;
 using System.Threading.Tasks;
 using Robust.Shared.Utility;
@@ -172,5 +176,57 @@ namespace Robust.Shared.IoC
 
             _container.Value.InjectDependencies(obj);
         }
+
+        public static void RegisterAssembly(string assembly)
+        {
+            Assembly asm;
+            try
+            {
+                asm = Assembly.Load(new AssemblyName(assembly));
+            }
+            catch (Exception)
+            {
+                var filePath = Path.Combine(Environment.CurrentDirectory, assembly + ".dll");
+                asm = Assembly.LoadFrom(filePath);
+            }
+
+            var registered = 0;
+
+            foreach (var attr in asm.ManifestModule.GetCustomAttributes<IoCRegisterAttribute>())
+            {
+                _container.Value.Register(attr.ContractType, attr.ConcreteType);
+                ++registered;
+            }
+            if (registered == 0)
+            {
+                throw new InvalidOperationException($"No IoC registrations on {assembly}.");
+            }
+        }
+
+        public static void RegisterAssembly<TInterface>(string assembly)
+        {
+            Assembly asm;
+            try
+            {
+                asm = Assembly.Load(new AssemblyName(assembly));
+            }
+            catch (Exception)
+            {
+                var filePath = Path.Combine(Environment.CurrentDirectory, assembly + ".dll");
+                asm = Assembly.LoadFrom(filePath);
+            }
+
+            var interfaceType = typeof(TInterface);
+            foreach (var attr in asm.ManifestModule.GetCustomAttributes<IoCRegisterAttribute>())
+            {
+                if (attr.ContractType != interfaceType)
+                {
+                    continue;
+                }
+                _container.Value.Register(attr.ContractType, attr.ConcreteType);
+                return;
+            }
+        }
     }
+
 }
