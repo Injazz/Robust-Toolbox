@@ -7,6 +7,7 @@ namespace Robust.Shared.Interfaces.Serialization
     {
         void Initialize();
         void Serialize(Stream stream, object obj);
+        void Serialize<T>(Stream stream, T obj);
         T Deserialize<T>(Stream stream);
         object Deserialize(Stream stream);
         bool CanSerialize(Type type);

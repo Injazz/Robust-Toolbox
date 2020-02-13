@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -8,35 +10,74 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Text;
+using System.Threading;
+using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
 using Robust.Shared.Serialization;
 
-[module:IoCRegister(typeof(IRobustSerializer), typeof(RobustSerializer))]
+[module: IoCRegister(typeof(IRobustSerializer), typeof(RobustSerializer))]
 
 namespace Robust.Shared.Serialization
 {
 
     using static RobustNetTypeInfo;
 
-    public class RobustSerializer : IRobustSerializer
+    public partial class RobustSerializer : IRobustSerializer
     {
 
-        public void Initialize()
+        // TRACE is set on release, so relying on DEBUG
+
+#if DEBUG
+        internal bool Tracing = false;
+#endif
+
+        internal static TextWriter _traceWriter = new StreamWriter(
+            File.Open($"robust-serializer.trace", FileMode.OpenOrCreate, FileAccess.Write),
+            Encoding.UTF8, 65536, false)
         {
+            AutoFlush = false
+        };
+
+        [Conditional("DEBUG")]
+        private void TraceWriteLine(string msg)
+        {
+            if (!Tracing)
+            {
+                return;
+            }
+
+            var formatted = $"{msg}".ToString();
+            /*
+                if (formatted.Length > 2000)
+                {
+                    Debug.WriteLine(formatted);
+                }
+                */
+
+            //Trace.WriteLine(formatted);
+            //System.Console.WriteLine(formatted);
+            _traceWriter.WriteLine(formatted);
+            _traceWriter.Flush();
         }
 
-        public void Serialize(Stream stream, object obj)
-            => Serialize(stream, obj, new List<object>());
+        [Conditional("DEBUG")]
+        private void TraceIndent()
+        {
+            if (Tracing)
+            {
+                Trace.Indent();
+            }
+        }
 
-        public T Deserialize<T>(Stream stream)
-            => Deserialize<T>(stream, new List<object>());
-
-        public object Deserialize(Stream stream)
-            => Deserialize(stream, new List<object>());
-
-        private IDictionary<Type, FieldInfo[]> _fieldCache
-            = new Dictionary<Type, FieldInfo[]>();
+        [Conditional("DEBUG")]
+        private void TraceUnindent()
+        {
+            if (Tracing)
+            {
+                Trace.Unindent();
+            }
+        }
 
         public static IEnumerable<Type> GetClassHierarchy(Type t)
         {
@@ -49,25 +90,36 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        private SortedSet<FieldInfo> GetFields(Type type)
+        private readonly IDictionary<Type, ImmutableSortedSet<FieldInfo>> _fieldCache
+            = new Dictionary<Type, ImmutableSortedSet<FieldInfo>>();
+
+        private ImmutableSortedSet<FieldInfo> GetFields(Type type)
         {
-            var fields = new SortedSet<FieldInfo>(FieldComparer);
-            foreach (var p in GetClassHierarchy(type))
+            // ReSharper disable once InvertIf
+            if (!_fieldCache.TryGetValue(type, out var fields))
             {
-                foreach (var field in p.GetFields(BindingFlags.Instance | BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic))
+                var fieldsBuilder = ImmutableSortedSet.CreateBuilder<FieldInfo>(FieldComparer);
+                foreach (var p in GetClassHierarchy(type))
                 {
-                    if (field.IsLiteral)
+                    foreach (var field in p.GetFields(BindingFlags.Instance | BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic))
                     {
-                        continue;
-                    }
+                        if (field.IsLiteral)
+                        {
+                            continue;
+                        }
 
-                    if (field.GetCustomAttributes<IgnoreDataMemberAttribute>().Any())
-                    {
-                        continue;
-                    }
+                        var customAttributes = field.GetCustomAttributes().ToList();
+                        if (customAttributes.OfType<IgnoreDataMemberAttribute>().Any()
+                            || customAttributes.OfType<NonSerializedAttribute>().Any())
+                        {
+                            continue;
+                        }
 
-                    fields.Add(field);
+                        fieldsBuilder.Add(field);
+                    }
                 }
+
+                _fieldCache.Add(type, fields = fieldsBuilder.ToImmutableSortedSet());
             }
 
             return fields;
@@ -104,29 +156,35 @@ namespace Robust.Shared.Serialization
         {
             if (items == null)
             {
+                stream.Write(BitConverter.GetBytes(0)); // null indicator
                 return;
             }
 
-            stream.WriteByte(1); // not null indicator
             var array = GetObjects(items).ToArray();
-            stream.Write(BitConverter.GetBytes(array.Length));
+            stream.Write(BitConverter.GetBytes(array.Length + 1));
             foreach (var item in array)
             {
                 Serialize(stream, item, backRefs);
             }
         }
 
-        internal IEnumerable ReadNonGenericEnumerable(Stream stream, List<object> backRefs)
+        internal IEnumerable ReadNonGenericEnumerable(Stream stream, List<object> backRefs, out int len)
         {
-            var notNullIndicator = stream.ReadByte();
-            if (notNullIndicator == 0)
+            var buf = new byte[4];
+            if (stream.Read(buf) == 0)
+            {
+                throw new InvalidOperationException("Could not read any more data.");
+            }
+
+            len = BitConverter.ToInt32(buf);
+
+            if (len == 0)
             {
                 return null;
             }
 
-            var buf = new byte[4];
-            stream.Read(buf);
-            var len = BitConverter.ToInt32(buf);
+            --len;
+
             return ReadNonGenericEnumerableInternal(stream, backRefs, len);
         }
 
@@ -142,41 +200,176 @@ namespace Robust.Shared.Serialization
         {
             if (items == null)
             {
-                // length (4) + null asm index (1)
-                for (var i = 0; i < 5; ++i)
-                {
-                    stream.WriteByte(0);
-                }
+                stream.Write(BitConverter.GetBytes(0));
 
                 return;
             }
 
             var array = items.Cast<object>().ToArray();
-            stream.Write(BitConverter.GetBytes(array.Length));
-            stream.WriteByte(1);
+            stream.Write(BitConverter.GetBytes(array.Length + 1));
             if (!skipElemTypeInfo)
             {
                 WriteTypeInfo(stream, itemType);
             }
 
-            foreach (var item in array)
+            var inheritorTypes = GetInheritorTypes(itemType);
+
+            if (inheritorTypes.Length == 0)
             {
-                Write(stream, itemType, item, backRefs);
+                foreach (var item in array)
+                {
+                    Write(stream, itemType, item, backRefs);
+                }
+            }
+            else
+            {
+                foreach (var item in array)
+                {
+                    if (item == null)
+                    {
+                        stream.WriteByte(0);
+                        continue;
+                    }
+
+                    var specificItemType = item.GetType();
+
+                    if (specificItemType == itemType)
+                    {
+                        stream.WriteByte(1);
+                        Write(stream, itemType, item, backRefs);
+                        continue;
+                    }
+
+                    var idx = -1;
+                    var isGeneric = specificItemType.IsConstructedGenericType;
+                    if (isGeneric)
+                    {
+                        for (var i = 0; i < inheritorTypes.Length; ++i)
+                        {
+                            var it = inheritorTypes[i];
+
+                            if (it.IsGenericTypeDefinition
+                                && it == specificItemType.GetGenericTypeDefinition())
+                            {
+                                idx = i;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for (var i = 0; i < inheritorTypes.Length; ++i)
+                        {
+                            var it = inheritorTypes[i];
+
+                            if (it == specificItemType)
+                            {
+                                idx = i;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (idx == -1)
+                    {
+                        throw new NotImplementedException("Runtime generated types are not yet serializable by this method.");
+                    }
+
+                    if (idx >= 250)
+                    {
+                        throw new NotImplementedException();
+                    }
+
+                    stream.WriteByte((byte) (idx + 2));
+
+                    if (isGeneric)
+                    {
+                        WriteGenericTypeInfo(stream, specificItemType);
+                    }
+
+                    Write(stream, specificItemType, item, backRefs);
+                }
             }
         }
 
-        internal static IEnumerable<T> ReadGenericEnumerableGeneric<T>(RobustSerializer szr, Stream stream, List<object> backRefs)
+        private static readonly IDictionary<Type, Type[]> _inheritorCache =
+            new Dictionary<Type, Type[]>();
+
+        private static Type[] GetInheritorTypes(Type type)
+        {
+            var isInterface = type.IsInterface;
+            var isBaseType = type.IsClass && !type.IsSealed;
+
+            if (!isInterface && !isBaseType)
+            {
+                return Type.EmptyTypes;
+            }
+
+            // ReSharper disable once InvertIf
+            if (!_inheritorCache.TryGetValue(type, out var inheritorTypes))
+            {
+                var inheritors = isInterface ? FindImplementingTypes(type) : FindInheritingTypes(type);
+
+                inheritorTypes = inheritors
+                    .Select(t =>
+                    {
+                        var asmIndex = GetAssemblyIndex(t.Assembly);
+                        if (asmIndex == null)
+                            return default;
+
+                        return (asmIndex: asmIndex.Value, type: t);
+                    })
+                    .Where(p => p.asmIndex != 0)
+                    .OrderBy(t => (t.asmIndex, t.type.MetadataToken))
+                    .Select(t => t.type)
+                    .ToArray();
+
+                _inheritorCache.Add(type, inheritorTypes);
+                return inheritorTypes;
+            }
+
+            return inheritorTypes ?? Type.EmptyTypes;
+        }
+
+        private static int ByteArrayCompare(byte[] a, byte[] b)
+        {
+            var lenCompare = a.Length.CompareTo(b.Length);
+            if (lenCompare != 0)
+            {
+                return lenCompare;
+            }
+
+            var l = a.Length;
+            for (var i = 0; i < l; ++i)
+            {
+                var valCompare = a[i].CompareTo(b[i]);
+                if (valCompare != 0)
+                {
+                    return valCompare;
+                }
+            }
+
+            return 0;
+        }
+
+        internal static IEnumerable<T> ReadGenericEnumerableGeneric<T>(RobustSerializer szr, Stream stream, List<object> backRefs, StrongBox<int> lengthBox)
         {
             var buf = new byte[4];
-            stream.Read(buf);
+            if (stream.Read(buf) == 0)
+            {
+                throw new InvalidOperationException("Could not read any more data.");
+            }
+
             var len = BitConverter.ToInt32(buf);
 
-            var isNull = stream.ReadByte() == 0;
-
-            if (len == 0 && isNull)
+            if (len == 0)
             {
                 return null;
             }
+
+            --len;
+
+            lengthBox.Value = len;
 
             return ReadGenericEnumerableGenericInternal<T>(szr, stream, backRefs, len);
         }
@@ -184,18 +377,50 @@ namespace Robust.Shared.Serialization
         internal static IEnumerable<T> ReadGenericEnumerableGenericInternal<T>(RobustSerializer szr, Stream stream, List<object> backRefs, int len)
         {
             var type = typeof(T);
-            for (var i = 0; i < len; ++i)
+            var inheritorTypes = GetInheritorTypes(type);
+            if (inheritorTypes.Length == 0)
             {
-                yield return (T) szr.Read(stream, type, backRefs);
+                for (var i = 0; i < len; ++i)
+                {
+                    yield return (T) szr.Read(stream, type, backRefs);
+                }
+            }
+            else
+            {
+                for (var i = 0; i < len; ++i)
+                {
+                    var idx = stream.ReadByte();
+                    if (idx == -1)
+                    {
+                        throw new InvalidOperationException("Could not read any more data.");
+                    }
+
+                    if (idx == 0)
+                    {
+                        yield return default;
+                    }
+                    else
+                    {
+                        if (idx == 1)
+                        {
+                            yield return (T) szr.Read(stream, type, backRefs);
+                        }
+                        else
+                        {
+                            var inheritor = inheritorTypes[idx - 2];
+                            yield return (T) szr.Read(stream, inheritor, backRefs);
+                        }
+                    }
+                }
             }
         }
 
-        private delegate IEnumerable ReadGenericEnumerableDelegate(RobustSerializer szr, Stream stream, List<object> backRefs);
+        private delegate IEnumerable ReadGenericEnumerableDelegate(RobustSerializer szr, Stream stream, List<object> backRefs, StrongBox<int> lengthBox);
 
         private IDictionary<Type, ReadGenericEnumerableDelegate> _readGenericEnumerableDelegateCache =
             new Dictionary<Type, ReadGenericEnumerableDelegate>();
 
-        internal IEnumerable ReadGenericEnumerable(Type type, Stream stream, List<object> backRefs)
+        internal IEnumerable ReadGenericEnumerable(Type type, Stream stream, List<object> backRefs, out int len)
         {
             if (!_readGenericEnumerableDelegateCache.TryGetValue(type, out var dlg))
             {
@@ -204,7 +429,10 @@ namespace Robust.Shared.Serialization
                     nameof(ReadGenericEnumerableGeneric), type);
             }
 
-            return dlg(this, stream, backRefs);
+            var lengthBox = new StrongBox<int>();
+            var e = dlg(this, stream, backRefs, lengthBox);
+            len = lengthBox.Value;
+            return e;
         }
 
         // see https://github.com/dotnet/runtime/blob/master/src/coreclr/src/vm/field.h class FieldDesc ~ line 75
@@ -245,153 +473,245 @@ namespace Robust.Shared.Serialization
         private Dictionary<Type, (MethodInfo Value, MethodInfo HasValue)> _nullableGetters =
             new Dictionary<Type, (MethodInfo, MethodInfo)>();
 
-        private Dictionary<Type, MethodInfo> _nullableSetters =
-            new Dictionary<Type, MethodInfo>();
-
         internal void Write(Stream stream, Type type, object obj, List<object> backRefs)
         {
-            if (type.IsConstructedGenericType)
+            TraceWriteLine($"Writing {type.Name}");
+            TraceIndent();
+            try
             {
-                var gtd = type.GetGenericTypeDefinition();
-
-                if (gtd == typeof(Nullable<>))
+#if DEBUG
+                if (obj != null)
                 {
-                    var underType = type.GetGenericArguments()[0];
-
-                    MethodInfo valueGetter, hasValueGetter;
-                    if (_nullableGetters.TryGetValue(type, out var getters))
+                    var valType = obj.GetType();
+                    if (type != valType)
                     {
-                        (valueGetter, hasValueGetter) = getters;
+                        throw new NotImplementedException("Correct type should be passed to Write calls");
                     }
-                    else
-                    {
-                        var valueProp = type.GetProperty("Value");
-                        // ReSharper disable once PossibleNullReferenceException
-                        valueGetter = valueProp.GetMethod;
-                        // ReSharper disable once PossibleNullReferenceException
-                        hasValueGetter = type.GetProperty("HasValue").GetMethod;
-                        _nullableGetters[type] = (valueGetter, hasValueGetter);
-                        // ReSharper disable once PossibleNullReferenceException
-                        var valueSetter = valueProp.SetMethod;
-                        _nullableSetters[type] = valueSetter;
-                    }
+                }
+#endif
+                if (type.IsConstructedGenericType)
+                {
+                    var gtd = type.GetGenericTypeDefinition();
 
-                    var hasValue = (bool) hasValueGetter.Invoke(obj, null);
-
-                    if (hasValue)
+                    if (gtd == typeof(Nullable<>))
                     {
-                        stream.WriteByte(1);
-                        var value = valueGetter.Invoke(obj, null);
-                        Write(stream, underType, value, backRefs);
-                        return;
-                    }
-                    else
-                    {
-                        stream.WriteByte(0);
+                        WriteNullable(stream, type, obj, backRefs);
                         return;
                     }
                 }
-            }
-            else if (type.IsArray)
-            {
-                if (type.HasElementType)
+                else if (type.IsArray)
                 {
-                    var elemType = type.GetElementType();
-                    if (elemType != typeof(object))
+                    if (type.HasElementType)
                     {
-                        WriteGenericEnumerable(stream, type.GetElementType(), (IEnumerable) obj, backRefs);
-                        return;
+                        var elemType = type.GetElementType();
+                        if (elemType != typeof(object))
+                        {
+                            WriteGenericEnumerable(stream, type.GetElementType(), (IEnumerable) obj, backRefs);
+                            return;
+                        }
                     }
-                }
 
-                WriteNonGenericEnumerable(stream, (IEnumerable) obj, backRefs);
-                return;
-            }
-            else if (type.IsPrimitive)
-            {
-                var bytes = (byte[]) BitConverter.GetBytes((dynamic) obj);
-                stream.Write(bytes);
-                return;
-            }
-            foreach (var field in GetFields(type))
-            {
-                //var typedRef = TypedReference.MakeTypedReference(obj, new[] {field});
-                var ft = field.FieldType;
-                var isValType = ft.IsValueType;
-                object value;
-                if (field.DeclaringType == type)
-                {
-                    value = field.GetValue(obj);
+                    WriteNonGenericEnumerable(stream, (IEnumerable) obj, backRefs);
+                    return;
                 }
-                else
+                else if (type.IsPrimitive)
                 {
-                    throw new NotImplementedException(field.ToString());
-                }
-
-                if (!isValType)
-                {
-                    if (!backRefs.Contains(value))
-                    {
-                        backRefs.Add(value);
-                    }
-                }
-                else if (ft.IsPrimitive)
-                {
-                    var bytes = (byte[]) BitConverter.GetBytes((dynamic) value);
+                    var bytes = (byte[]) BitConverter.GetBytes((dynamic) obj);
                     stream.Write(bytes);
-                    continue;
+                    return;
                 }
-
-                if (ft.IsArray)
+                else if (type == typeof(string))
                 {
-                    WriteGenericEnumerable(stream, ft.GetElementType(), (IEnumerable) value, backRefs);
-                    continue;
-                }
-
-                if (ft == typeof(string))
-                {
-                    if (value == null)
+                    if (obj == null)
                     {
                         stream.Write(BitConverter.GetBytes(0));
-                        continue;
+                        return;
                     }
 
-                    var bytes = Encoding.UTF8.GetBytes((string) value);
+                    if (TryGetStringId((string) obj, out var stringId))
+                    {
+                        stream.Write(BitConverter.GetBytes(int.MaxValue)); // shared string
+                        var intStringId = (stringId.AssemblyIndex << 24) | stringId.StringIndex;
+                        stream.Write(BitConverter.GetBytes(intStringId));
+                        return;
+                    }
+
+                    // shared string
+                    var bytes = Encoding.UTF8.GetBytes((string) obj);
                     stream.Write(BitConverter.GetBytes(bytes.Length + 1));
                     stream.Write(bytes);
-                    continue;
+                    return;
                 }
 
-                if (typeof(IEnumerable).IsAssignableFrom(ft))
+                if (typeof(IEnumerable).IsAssignableFrom(type))
                 {
-                    var typedEnum = ft.GetInterfaces()
-                        .FirstOrDefault(intf => intf.IsConstructedGenericType
-                            && intf.Namespace == "System.Collections.Generic" && intf.Name.StartsWith("IEnumerable`1")
-                            && intf.GetGenericTypeDefinition().Name == "IEnumerable`1");
-                    if (typedEnum != null)
-                    {
-                        WriteGenericEnumerable(stream, typedEnum.GenericTypeArguments[0], (IEnumerable) value, backRefs);
-                    }
-                    else
-                    {
-                        WriteNonGenericEnumerable(stream, (IEnumerable) value, backRefs);
-                    }
-
-                    continue;
+                    WriteEnumerable(stream, type, obj, backRefs);
                 }
 
-                if (!isValType)
+                if (obj == null)
                 {
-                    if (value == null)
+                    if (type.IsValueType)
                     {
-                        stream.WriteByte(0);
-                        continue; // null type id already written
+                        throw new NotImplementedException();
                     }
 
-                    WriteTypeInfo(stream, value.GetType());
+                    stream.Write(BitConverter.GetBytes(0));
+                    return;
                 }
 
-                Write(stream, ft, value, backRefs);
+                foreach (var field in GetFields(type))
+                {
+                    TraceWriteLine($"Writing {type.Name}.{field.Name}");
+                    TraceIndent();
+                    try
+                    {
+                        //var typedRef = TypedReference.MakeTypedReference(obj, new[] {field});
+                        var ft = field.FieldType;
+                        var isValType = ft.IsValueType;
+                        object value;
+                        value = field.GetValue(obj);
+
+                        if (!isValType)
+                        {
+                            if (value != null)
+                            {
+                                var valType = value.GetType();
+                                ft = valType;
+                            }
+
+                            if (!backRefs.Contains(value))
+                            {
+                                backRefs.Add(value);
+                            }
+                        }
+                        else if (ft.IsPrimitive)
+                        {
+                            var bytes = (byte[]) BitConverter.GetBytes((dynamic) value);
+                            stream.Write(bytes);
+                            continue;
+                        }
+
+                        if (ft.IsArray)
+                        {
+                            WriteGenericEnumerable(stream, ft.GetElementType(), (IEnumerable) value, backRefs);
+                            continue;
+                        }
+
+                        if (ft == typeof(string))
+                        {
+                            if (value == null)
+                            {
+                                stream.Write(BitConverter.GetBytes(0));
+                                continue;
+                            }
+
+                            if (TryGetStringId((string) value, out var stringId))
+                            {
+                                stream.Write(BitConverter.GetBytes(int.MaxValue)); // shared string
+                                var intStringId = (stringId.AssemblyIndex << 24) | stringId.StringIndex;
+                                stream.Write(BitConverter.GetBytes(intStringId));
+                                continue;
+                            }
+
+                            // shared string
+                            var bytes = Encoding.UTF8.GetBytes((string) value);
+                            stream.Write(BitConverter.GetBytes(bytes.Length + 1));
+                            stream.Write(bytes);
+                            continue;
+                        }
+
+                        if (typeof(IEnumerable).IsAssignableFrom(ft))
+                        {
+                            WriteEnumerable(stream, ft, value, backRefs);
+                            continue;
+                        }
+
+                        if (!isValType)
+                        {
+                            if (value == null)
+                            {
+                                stream.Write(BitConverter.GetBytes(0));
+                                continue;
+                            }
+
+                            WriteTypeInfo(stream, value.GetType());
+                        }
+                        else
+                        {
+                            if (ft.IsConstructedGenericType)
+                            {
+                                var gtd = ft.GetGenericTypeDefinition();
+
+                                if (gtd == typeof(Nullable<>))
+                                {
+                                    WriteNullable(stream, ft, value, backRefs);
+                                    continue;
+                                }
+                            }
+                        }
+
+                        Write(stream, ft, value, backRefs);
+                    }
+                    finally
+                    {
+                        TraceUnindent();
+                    }
+                }
+            }
+            finally
+            {
+                TraceUnindent();
+            }
+        }
+
+        private void WriteEnumerable(Stream stream, Type type, object obj, List<object> backRefs)
+        {
+            var typedEnum = type.GetInterfaces()
+                .FirstOrDefault(intf => intf.IsConstructedGenericType
+                    && intf.Namespace == "System.Collections.Generic" && intf.Name.StartsWith("IEnumerable`1")
+                    && intf.GetGenericTypeDefinition().Name == "IEnumerable`1");
+            if (typedEnum != null)
+            {
+                WriteGenericEnumerable(stream, typedEnum.GenericTypeArguments[0], (IEnumerable) obj, backRefs);
+            }
+            else
+            {
+                WriteNonGenericEnumerable(stream, (IEnumerable) obj, backRefs);
+            }
+
+            return;
+        }
+
+        private void WriteNullable(Stream stream, Type type, object obj, List<object> backRefs)
+        {
+            var underType = type.GetGenericArguments()[0];
+
+            MethodInfo valueGetter, hasValueGetter;
+            if (_nullableGetters.TryGetValue(type, out var getters))
+            {
+                (valueGetter, hasValueGetter) = getters;
+            }
+            else
+            {
+                var valueProp = type.GetProperty("Value");
+                // ReSharper disable once PossibleNullReferenceException
+                valueGetter = valueProp.GetMethod;
+                // ReSharper disable once PossibleNullReferenceException
+                hasValueGetter = type.GetProperty("HasValue").GetMethod;
+                _nullableGetters[type] = (valueGetter, hasValueGetter);
+            }
+
+            var hasValue = obj != null && (bool) hasValueGetter.Invoke(obj, null);
+
+            if (hasValue)
+            {
+                stream.WriteByte(1);
+                var value = valueGetter.Invoke(obj, null);
+                Write(stream, underType, value, backRefs);
+            }
+            else
+            {
+                stream.WriteByte(0);
             }
         }
 
@@ -431,24 +751,35 @@ namespace Robust.Shared.Serialization
             return dlg(bytes);
         }
 
-        internal Array MakeGenericArray(IEnumerable objects, Type itemType)
+        internal Array MakeGenericArray(IEnumerable objects, Type itemType, int size)
         {
             if (objects == null)
             {
                 return null;
             }
 
-            var objs = new List<object>();
-
-            foreach (var obj in objects)
+            if (size < 0)
             {
-                objs.Add(obj);
+                throw new ArgumentOutOfRangeException(nameof(size));
             }
 
-            var array = Array.CreateInstance(itemType, objs.Count);
-            for (var i = 0; i < objs.Count; i++)
+            var array = Array.CreateInstance(itemType, size);
+
+            if (size == 0)
             {
-                array.SetValue(objs[i], i);
+                return array;
+            }
+
+            var e = objects.GetEnumerator();
+
+            for (var i = 0; i < size; i++)
+            {
+                if (!e.MoveNext())
+                {
+                    throw new NotImplementedException("Mismatched length and enumeration.");
+                }
+
+                array.SetValue(e.Current, i);
             }
 
             return array;
@@ -463,297 +794,485 @@ namespace Robust.Shared.Serialization
 
         internal object Read(Stream stream, Type type, List<object> backRefs)
         {
+            TraceWriteLine($"Reading {type?.Name ?? "null"}");
+            TraceIndent();
+            try
+            {
+                if (type.IsConstructedGenericType)
+                {
+                    var gtd = type.GetGenericTypeDefinition();
+
+                    if (gtd == typeof(Nullable<>))
+                    {
+                        return ReadNullable(stream, type, backRefs);
+                    }
+                }
+                else if (type.IsArray)
+                {
+                    if (type.HasElementType)
+                    {
+                        var elemType = type.GetElementType();
+                        if (elemType == typeof(object))
+                        {
+                            return MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), elemType, len);
+                        }
+                        else
+                        {
+                            return MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
+                        }
+                    }
+                    else
+                    {
+                        // do non-generic arrays exist anymore?
+                        return MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len);
+                    }
+                }
+                else if (type == typeof(string))
+                {
+                    string str;
+                    var buf = new byte[4];
+                    if (stream.Read(buf) == 0)
+                    {
+                        throw new InvalidOperationException("Could not read any more data.");
+                    }
+
+                    var len = BitConverter.ToInt32(buf);
+                    if (len == 0)
+                    {
+                        // null
+                        return null;
+                    }
+
+                    if (len == int.MaxValue)
+                    {
+                        // shared string
+                        if (stream.Read(buf) == 0)
+                        {
+                            throw new InvalidOperationException("Could not read any more data.");
+                        }
+
+                        var stringId = BitConverter.ToInt32(buf);
+                        var asmIndex = (byte) (stringId >> 24);
+                        var stringIdx = stringId & 0x00FFFFFF;
+                        if (!TryGetString((asmIndex, stringIdx), out str))
+                        {
+                            throw new InvalidOperationException($"Shared string {asmIndex}:{stringId} missing!");
+                        }
+
+                        return str;
+                    }
+
+                    --len;
+
+                    if (len == 0)
+                    {
+                        return "";
+                    }
+
+                    buf = new byte[len];
+                    if (len >= 32768) // TODO: when it's stable remove this
+                    {
+                        throw new NotSupportedException();
+                    }
+
+                    if (stream.Read(buf) == 0)
+                    {
+                        throw new InvalidOperationException("Could not read any more data.");
+                    }
+
+                    str = Encoding.UTF8.GetString(buf);
+                    return str;
+                }
+
+                if (typeof(IEnumerable).IsAssignableFrom(type))
+                {
+                    return ReadEnumerable(stream, type, backRefs);
+                }
+
+                {
+                    var obj = FormatterServices.GetUninitializedObject(type);
+                    foreach (var field in GetFields(type))
+                    {
+                        TraceWriteLine($"Reading {type.Name}.{field.Name}");
+                        TraceIndent();
+                        try
+                        {
+                            var ft = field.FieldType;
+                            //var typedRef = TypedReference.MakeTypedReference(obj, new[] {field});
+                            var isValType = ft.IsValueType;
+                            if (!isValType)
+                            {
+                                // ok
+                            }
+                            else if (ft.IsPrimitive)
+                            {
+                                var proto = FormatterServices.GetUninitializedObject(ft);
+                                var size = ((byte[]) BitConverter.GetBytes((dynamic) proto)).Length;
+                                var bytes = new byte[size];
+                                if (stream.Read(bytes) == 0)
+                                {
+                                    throw new InvalidOperationException("Could not read any more data.");
+                                }
+
+                                //field.SetValueDirect(typedRef, CreateValueType(ft, bytes));
+                                field.SetValue(obj, CreateValueType(ft, bytes));
+                                continue;
+                            }
+
+                            if (ft.IsConstructedGenericType)
+                            {
+                                var gtd = ft.GetGenericTypeDefinition();
+
+                                if (gtd == typeof(Nullable<>))
+                                {
+                                    field.SetValue(obj, ReadNullable(stream, ft, backRefs));
+                                    continue;
+                                }
+                            }
+
+                            if (ft.IsArray)
+                            {
+                                var elemType = ft.GetElementType();
+                                var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
+                                //field.SetValueDirect(typedRef, MakeGenericArray(items, elemType));
+                                field.SetValue(obj, array);
+                                continue;
+                            }
+
+                            if (ft == typeof(string))
+                            {
+                                string str;
+                                var buf = new byte[4];
+                                if (stream.Read(buf) == 0)
+                                {
+                                    throw new InvalidOperationException("Could not read any more data.");
+                                }
+
+                                var len = BitConverter.ToInt32(buf);
+                                if (len == 0)
+                                {
+                                    // null
+                                    continue;
+                                }
+
+                                if (len == int.MaxValue)
+                                {
+                                    // shared string
+                                    if (stream.Read(buf) == 0)
+                                    {
+                                        throw new InvalidOperationException("Could not read any more data.");
+                                    }
+
+                                    var stringId = BitConverter.ToInt32(buf);
+                                    var asmIndex = (byte) (stringId >> 24);
+                                    var stringIdx = stringId & 0x00FFFFFF;
+                                    if (!TryGetString((asmIndex, stringIdx), out str))
+                                    {
+                                        throw new InvalidOperationException($"Shared string {asmIndex}:{stringId} missing!");
+                                    }
+
+                                    field.SetValue(obj, str);
+
+                                    continue;
+                                }
+
+                                --len;
+
+                                if (len == 0)
+                                {
+                                    field.SetValue(obj, "");
+                                }
+
+                                buf = new byte[len];
+                                if (len >= 32768) // TODO: when it's stable remove this
+                                {
+                                    throw new NotSupportedException();
+                                }
+
+                                if (stream.Read(buf) == 0)
+                                {
+                                    throw new InvalidOperationException("Could not read any more data.");
+                                }
+
+                                str = Encoding.UTF8.GetString(buf);
+                                field.SetValue(obj, str);
+                                continue;
+                            }
+
+                            if (typeof(IEnumerable).IsAssignableFrom(ft))
+                            {
+                                var value = ReadEnumerable(stream, ft, backRefs);
+
+                                if (value != null)
+                                {
+                                    field.SetValue(obj, value);
+                                }
+
+                                continue;
+                            }
+
+                            //field.SetValueDirect(typedRef, Read(stream, ft, backRefs));
+                            var it = ft;
+                            if (!isValType)
+                            {
+                                it = ReadTypeInfo(stream);
+                                if (it == null)
+                                {
+                                    //field.SetValue(obj, null);
+                                    continue;
+                                }
+                            }
+
+                            field.SetValue(obj, Read(stream, it, backRefs));
+                        }
+                        finally
+                        {
+                            TraceUnindent();
+                        }
+                    }
+
+                    return obj;
+                }
+            }
+            finally
+            {
+                TraceUnindent();
+            }
+
             if (type == null)
             {
                 return null;
             }
+        }
 
-            if (type.IsConstructedGenericType)
+        private object ReadEnumerable(Stream stream, Type type, List<object> backRefs)
+        {
+            var typedEnum = type.GetInterfaces()
+                .FirstOrDefault(t => t.IsConstructedGenericType
+                    && t.Namespace == "System.Collections.Generic" && t.Name.StartsWith("IEnumerable`1")
+                    && t.GetGenericTypeDefinition().Name == "IEnumerable`1");
+            if (typedEnum != null)
             {
-                var obj = FormatterServices.GetUninitializedObject(type);
-                var gtd = type.GetGenericTypeDefinition();
-
-                if (gtd == typeof(Nullable<>))
+                if (_ctorCache.TryGetValue(type, out var ctor))
                 {
-                    var underType = type.GetGenericArguments()[0];
-
-                    if (!_nullableSetters.TryGetValue(type, out var valueSetter))
+                    var paramType = ctor.GetParameters()[0].ParameterType;
+                    if (paramType.IsArray)
                     {
-                        // ReSharper disable once PossibleNullReferenceException
-                        valueSetter = type.GetProperty("Value").SetMethod;
-                        _nullableSetters[type] = valueSetter;
-                    }
-
-                    var hasValue = stream.ReadByte() != 0;
-
-                    if (!hasValue)
-                    {
-                        return obj;
-                    }
-
-                    var value = Read(stream, underType, backRefs);
-                    valueSetter.Invoke(obj, new[] {value});
-                    return obj;
-                }
-            }
-            else if (type.IsArray)
-            {
-
-                if (type.HasElementType)
-                {
-                    var elemType = type.GetElementType();
-                    if (elemType == typeof(object))
-                    {
-                        return MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs), elemType);
-                    }
-                    return MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs), elemType);
-                }
-                // do non-generic arrays exist anymore?
-                return MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs), typeof(object));
-            }
-
-            {
-                var obj = FormatterServices.GetUninitializedObject(type);
-                foreach (var field in GetFields(type))
-                {
-                    var ft = field.FieldType;
-                    //var typedRef = TypedReference.MakeTypedReference(obj, new[] {field});
-                    var isValType = ft.IsValueType;
-                    if (!isValType)
-                    {
-                        // ok
-                    }
-                    else if (ft.IsPrimitive)
-                    {
-                        var size = Marshal.SizeOf(ft);
-                        var bytes = new byte[size];
-                        stream.Read(bytes);
-                        //field.SetValueDirect(typedRef, CreateValueType(ft, bytes));
-                        field.SetValue(obj, CreateValueType(ft, bytes));
-                        continue;
-                    }
-
-                    if (ft.IsArray)
-                    {
-                        var elemType = ft.GetElementType();
-                        var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs), elemType);
-                        //field.SetValueDirect(typedRef, MakeGenericArray(items, elemType));
-                        field.SetValue(obj, array);
-                        continue;
-                    }
-
-                    if (ft == typeof(string))
-                    {
-                        var buf = new byte[4];
-                        stream.Read(buf);
-                        var len = BitConverter.ToInt32(buf) - 1;
-                        if (len == -1)
+                        var elemType = paramType.GetElementType();
+                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                        var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
+                        if (array == null)
                         {
-                            // null
-                            continue;
+                            return null;
                         }
 
-                        if (len == 0)
-                        {
-                            field.SetValue(obj, "");
-                        }
-
-                        buf = new byte[len];
-                        if (len >= 32768) // TODO: when it's stable remove this
-                        {
-                            throw new NotSupportedException();
-                        }
-
-                        stream.Read(buf);
-                        var str = Encoding.UTF8.GetString(buf);
-                        field.SetValue(obj, str);
-                        continue;
+                        return ctor.Invoke(new object[]
+                            {
+                                array
+                            }
+                        );
                     }
-
-                    if (typeof(IEnumerable).IsAssignableFrom(ft))
+                    else
                     {
-                        var typedEnum = ft.GetInterfaces()
-                            .FirstOrDefault(t => t.IsConstructedGenericType
-                                && t.Namespace == "System.Collections.Generic" && t.Name.StartsWith("IEnumerable`1")
-                                && t.GetGenericTypeDefinition().Name == "IEnumerable`1");
-                        if (typedEnum != null)
+                        var elemType = paramType.GenericTypeArguments[0];
+                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                        var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
+                        if (array == null)
                         {
-                            if (_ctorCache.TryGetValue(ft, out var ctor))
-                            {
-                                var paramType = ctor.GetParameters()[0].ParameterType;
-                                if (paramType.IsArray)
-                                {
-                                    var elemType = paramType.GetElementType();
-                                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                                    field.SetValue(obj, ctor.Invoke(new object[]
-                                        {
-                                            MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs), elemType)
-                                        }
-                                    ));
-                                }
-                                else
-                                {
-                                    var elemType = paramType.GenericTypeArguments[0];
-                                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                                    field.SetValue(obj, ctor.Invoke(new object[]
-                                        {
-                                            MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs), elemType)
-                                        }
-                                    ));
-                                }
-
-                                continue;
-                            }
-
-                            // variable name scope
-                            {
-                                var ctors = ft.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                var elemType = typedEnum.GenericTypeArguments[0];
-                                var arrayType = elemType.MakeArrayType();
-                                ctor = ctors.FirstOrDefault(c =>
-                                {
-                                    var ps = c.GetParameters();
-                                    return ps.Length == 1 && ps[0].ParameterType == typedEnum;
-                                });
-
-                                if (ctor != null)
-                                {
-                                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                                    var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs), elemType);
-                                    if (array != null)
-                                    {
-                                        field.SetValue(obj, ctor.Invoke(new object[]
-                                            {
-                                                array
-                                            }
-                                        ));
-                                    }
-
-                                    _ctorCache[ft] = ctor;
-                                    continue;
-                                }
-
-                                ctor = ctors.FirstOrDefault(c =>
-                                {
-                                    var ps = c.GetParameters();
-                                    return ps.Length == 1 && (ps[0].ParameterType == arrayType
-                                        );
-                                });
-
-                                if (ctor != null)
-                                {
-                                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                                    var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs), elemType);
-                                    if (array != null)
-                                    {
-                                        field.SetValue(obj, ctor.Invoke(new object[]
-                                            {
-                                                array
-                                            }
-                                        ));
-                                    }
-
-                                    _ctorCache[ft] = ctor;
-                                    continue;
-                                }
-
-                                throw new NotSupportedException($"{ft.FullName} {type.FullName}.{field.Name}");
-                            }
+                            return null;
                         }
-                        else
-                        {
-                            if (_ctorCache.TryGetValue(ft, out var ctor))
-                            {
-                                var paramType = ctor.GetParameters()[0].ParameterType;
-                                if (paramType.IsArray)
-                                {
-                                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                                    field.SetValue(obj, ctor.Invoke(new object[]
-                                        {
-                                            MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs), typeof(object))
-                                        }
-                                    ));
-                                }
-                                else
-                                {
-                                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                                    field.SetValue(obj, ctor.Invoke(new object[]
-                                        {
-                                            MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs), typeof(object))
-                                        }
-                                    ));
-                                }
 
-                                continue;
+                        return ctor.Invoke(new object[]
+                            {
+                                array
                             }
-
-                            var ctors = ft.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            var untypedEnum = typeof(IEnumerable);
-
-                            ctor = ctors.FirstOrDefault(c =>
-                            {
-                                var ps = c.GetParameters();
-                                return ps.Length == 1 && ps[0].ParameterType == untypedEnum;
-                            });
-
-                            if (ctor != null)
-                            {
-                                //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                                field.SetValue(obj, ctor.Invoke(new object[]
-                                    {
-                                        MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs), typeof(object))
-                                    }
-                                ));
-                                _ctorCache[ft] = ctor;
-                                continue;
-                            }
-
-                            ctor = ctors.FirstOrDefault(c =>
-                            {
-                                var ps = c.GetParameters();
-                                return ps.Length == 1 && ps[0].ParameterType.IsArray && ps[0].ParameterType == typeof(object[]);
-                            });
-                            if (ctor != null)
-                            {
-                                //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                                field.SetValue(obj, ctor.Invoke(new object[]
-                                    {
-                                        MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs), typeof(object))
-                                    }
-                                ));
-                            }
-
-                            throw new NotSupportedException($"{ft.FullName} {type.FullName}.{field.Name}");
-                        }
+                        );
                     }
-
-                    //field.SetValueDirect(typedRef, Read(stream, ft, backRefs));
-                    var it = ft;
-                    if (!isValType)
-                    {
-                        it = ReadTypeInfo(stream);
-                    }
-
-                    field.SetValue(obj, Read(stream, it, backRefs));
                 }
 
-                return obj;
+                // variable name scope
+                {
+                    var ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var elemType = typedEnum.GenericTypeArguments[0];
+                    var arrayType = elemType.MakeArrayType();
+                    ctor = ctors.FirstOrDefault(c =>
+                    {
+                        var ps = c.GetParameters();
+                        return ps.Length == 1 && ps[0].ParameterType == typedEnum;
+                    });
+
+                    if (ctor != null)
+                    {
+                        _ctorCache[type] = ctor;
+                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                        var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
+                        if (array != null)
+                        {
+                            return ctor.Invoke(new object[]
+                                {
+                                    array
+                                }
+                            );
+                        }
+
+                        return null;
+                    }
+
+                    ctor = ctors.FirstOrDefault(c =>
+                    {
+                        var ps = c.GetParameters();
+                        return ps.Length == 1 && (ps[0].ParameterType == arrayType
+                            );
+                    });
+
+                    if (ctor != null)
+                    {
+                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                        _ctorCache[type] = ctor;
+                        var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
+                        if (array == null)
+                        {
+                            return null;
+                        }
+
+                        return ctor.Invoke(new object[]
+                            {
+                                array
+                            }
+                        );
+                    }
+
+                    throw new NotSupportedException($"{type.FullName}");
+                }
             }
+            else
+            {
+                if (_ctorCache.TryGetValue(type, out var ctor))
+                {
+                    var paramType = ctor.GetParameters()[0].ParameterType;
+                    if (paramType.IsArray)
+                    {
+                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                        return ctor.Invoke(new object[]
+                            {
+                                MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len)
+                            }
+                        );
+                    }
+                    else
+                    {
+                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                        return ctor.Invoke(new object[]
+                            {
+                                MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len)
+                            }
+                        );
+                    }
+                }
+
+                var ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var untypedEnum = typeof(IEnumerable);
+
+                ctor = ctors.FirstOrDefault(c =>
+                {
+                    var ps = c.GetParameters();
+                    return ps.Length == 1 && ps[0].ParameterType == untypedEnum;
+                });
+
+                if (ctor != null)
+                {
+                    _ctorCache[type] = ctor;
+                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                    return ctor.Invoke(new object[]
+                        {
+                            MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len)
+                        }
+                    );
+                }
+
+                ctor = ctors.FirstOrDefault(c =>
+                {
+                    var ps = c.GetParameters();
+                    return ps.Length == 1 && ps[0].ParameterType.IsArray && ps[0].ParameterType == typeof(object[]);
+                });
+
+                if (ctor != null)
+                {
+                    _ctorCache[type] = ctor;
+                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                    return ctor.Invoke(new object[]
+                        {
+                            MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len)
+                        }
+                    );
+                }
+
+                throw new NotSupportedException($"{type.FullName}");
+            }
+
+            throw new NotImplementedException();
+        }
+
+        // ReSharper disable once ConvertNullableToShortForm
+        // ReSharper disable once RedundantExplicitNullableCreation
+        private static object NullableConstructorGeneric<T>(object value) where T : struct => new Nullable<T>((T) value);
+
+        private delegate object NullableConstructor(object value);
+
+        private IDictionary<Type, NullableConstructor> _nullableConstructors = new Dictionary<Type, NullableConstructor>();
+
+        private object ReadNullable(Stream stream, Type type, List<object> backRefs)
+        {
+            var obj = FormatterServices.GetUninitializedObject(type);
+            var underType = type.GetGenericArguments()[0];
+
+            var hasValue = stream.ReadByte() != 0;
+
+            if (!hasValue)
+            {
+                return null;
+            }
+
+            if (!_nullableConstructors.TryGetValue(type, out var ctor))
+            {
+                ctor = CreateDelegate<NullableConstructor, RobustSerializer>(
+                    BindingFlags.NonPublic | BindingFlags.Static,
+                    nameof(NullableConstructorGeneric), type.GenericTypeArguments[0]);
+                _nullableConstructors.Add(type, ctor);
+            }
+
+            return ctor(Read(stream, underType, backRefs));
         }
 
         internal void Serialize<T>(Stream stream, T obj, List<object> backRefs)
         {
-            if (obj == null)
+            var type = typeof(T);
+
+            if (obj == null && !type.IsValueType)
             {
                 stream.WriteByte(0);
                 return;
             }
 
-            var type = obj.GetType();
-
             if (type == typeof(object))
             {
-                throw new NotSupportedException("Synchronization objects (plain empty objects) are not supported and not serialized.");
+                if (obj == null)
+                {
+                    stream.WriteByte(0);
+                    return;
+                }
+
+                type = obj.GetType();
+                if (type == typeof(object))
+                {
+                    throw new NotSupportedException("Synchronization objects (plain empty objects) are not supported and not serialized.");
+                }
+            }
+
+            if (obj != null)
+            {
+                // use *actual* type
+                type = obj.GetType();
             }
 
             var start = stream.Position;
@@ -770,7 +1289,7 @@ namespace Robust.Shared.Serialization
         internal void SerializeGeneric<T>(Stream stream, T obj, List<object> backRefs) =>
             Serialize(stream, (object) obj, backRefs);
 
-        internal IEnumerable<Type> GetImplementingTypes(Type intf)
+        internal static IEnumerable<Type> FindImplementingTypes(Type intf)
         {
             foreach (var asm in GetAssemblies())
             {
@@ -784,7 +1303,7 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        internal IEnumerable<Type> GetInheritingTypes(Type baseType)
+        internal static IEnumerable<Type> FindInheritingTypes(Type baseType)
         {
             foreach (var asm in GetAssemblies())
             {
@@ -793,6 +1312,14 @@ namespace Robust.Shared.Serialization
                     if (type.BaseType == baseType)
                     {
                         yield return type;
+
+                        if (!type.IsSealed)
+                        {
+                            foreach (var subType in FindInheritingTypes(type))
+                            {
+                                yield return subType;
+                            }
+                        }
                     }
                 }
             }
@@ -849,9 +1376,6 @@ namespace Robust.Shared.Serialization
             var byteCount = finish - start;
             return obj;
         }
-
-        public bool CanSerialize(Type type) =>
-            GetAssemblies().Contains(type.Assembly);
 
     }
 

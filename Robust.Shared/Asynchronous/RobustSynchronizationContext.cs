@@ -20,12 +20,29 @@ namespace Robust.Shared.Asynchronous
 
         public override void Send(SendOrPostCallback d, object state)
         {
+
             if (Current != this)
             {
-                // Being invoked from another thread?
-                // If this not implemented exception starts being a problem I'll fix it but right now I'd rather err on the side of caution,
-                // so that if cross thread usage is required I have a test case, instead of a data race.
-                throw new NotImplementedException();
+                var cts = new CancellationTokenSource();
+                try
+                {
+                    using var e = new ManualResetEventSlim(false, 0);
+                    Post(_ =>
+                    {
+                        d(state);
+                        // ReSharper disable once AccessToDisposedClosure
+                        e.Set();
+                    }, null);
+                    e.Wait(cts.Token);
+                }
+                catch (ThreadAbortException)
+                {
+                    cts.Cancel();
+                }
+                catch (ThreadInterruptedException)
+                {
+                    cts.Cancel();
+                }
             }
 
             d(state);

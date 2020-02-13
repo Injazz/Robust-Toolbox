@@ -22,8 +22,12 @@ namespace Robust.Shared.Serialization
     public static class RobustNetTypeInfo
     {
 
+        // this is static readonly so dependencies will not have const prop,
+        // so when assembly is updated they don't need to rebuild
+        public static readonly int RobustNetTypeInfoSize = 4;
+
         // TODO: use IoC?
-        private static readonly Assembly[] _Assemblies =
+        private static Assembly[] _Assemblies =
         {
             AssemblyLoadContext.Default.Assemblies.FirstOrDefault(a => a.GetName().Name == "System.Private.CoreLib"), // used for net type ids but not for strings
             AssemblyLoadContext.Default.Assemblies.FirstOrDefault(a => a.GetName().Name == "Robust.Shared"), // should not be null
@@ -43,6 +47,14 @@ namespace Robust.Shared.Serialization
 
         public static int GetAssemblyCount() => _Assemblies.Count(a => a != null);
 
+        public static bool RegisterAssembly(Assembly asm)
+        {
+            if (_Assemblies.Contains(asm)) return false;
+
+            _Assemblies = _Assemblies.Concat(new[] {asm}).ToArray();
+            return true;
+        }
+
         public static IEnumerable<Assembly> GetAssemblies() => _Assemblies.Where(a => a != null);
 
         public static Assembly GetAssembly(int asmIndex)
@@ -54,6 +66,23 @@ namespace Robust.Shared.Serialization
             }
 
             return _Assemblies[index];
+        }
+
+        public static int? GetAssemblyIndex(Assembly asm)
+        {
+            if (asm == null)
+            {
+                return null;
+            }
+
+            var index = Array.IndexOf(_Assemblies, asm);
+
+            if (index == -1)
+            {
+                return null;
+            }
+
+            return index + 1;
         }
 
         private class UserStringDictionary
@@ -249,17 +278,29 @@ namespace Robust.Shared.Serialization
 
             if (asmIndex > AssemblyStringDictionaries.Count)
             {
-                s = null;
-                return false;
+                throw new InvalidOperationException($"No assembly is registered for assembly index {asmIndex}.");
             }
 
-            s = AssemblyStringDictionaries[asmIndex].IdToString[stringId.StringIndex];
+            var strDict = AssemblyStringDictionaries[asmIndex];
+            
+            if (strDict == null || strDict.IdToString.Count == 0)
+            {
+                throw new InvalidOperationException($"No strings are registered for assembly {asmIndex} ({_Assemblies[asmIndex]?.ToString() ?? "reserved"})");
+            }
+            
+            if (stringId.StringIndex > strDict.IdToString.Count)
+            {
+                throw new InvalidOperationException($"String is {stringId} missing from assembly {asmIndex} ({_Assemblies[asmIndex]?.ToString() ?? "reserved"})");
+            }
+
+            s = strDict.IdToString[stringId.StringIndex];
+            
             return true;
         }
 
         public static byte[] GetNetTypeInfo(Type type)
         {
-            using var ms = new MemoryStream(5);
+            using var ms = new MemoryStream(RobustNetTypeInfoSize);
             WriteTypeInfo(ms, type);
             return ms.ToArray();
         }
@@ -270,8 +311,9 @@ namespace Robust.Shared.Serialization
             return ReadTypeInfo(ms);
         }
 
-        public static void WriteTypeInfo(Stream stream, Type type)
+        public static void WriteTypeInfo(Stream stream, [NotNull] Type type)
         {
+            // recursion for generic types by loop to avoid stack frames
             var asm = type.Assembly;
             var asmIndex = Array.IndexOf(_Assemblies, asm) + 1;
             if (asmIndex <= 0)
@@ -280,51 +322,50 @@ namespace Robust.Shared.Serialization
             }
 
             var typeId = type.MetadataToken;
-            stream.WriteByte((byte) asmIndex);
-            stream.Write(BitConverter.GetBytes(typeId)); // could maybe drop the high byte, should always be same?
+            var bytes = BitConverter.GetBytes(typeId);
+            bytes[3] = (byte) asmIndex;
+            //stream.WriteByte((byte) asmIndex);
+            stream.Write(bytes); // could maybe drop the high byte, should always be same?
             if (type.IsConstructedGenericType)
             {
                 WriteGenericTypeInfo(stream, type);
             }
             else if (type.IsArray)
             {
-                stream.WriteByte((byte)type.GetArrayRank());
-                WriteTypeInfo(stream,type.GetElementType());
+                stream.WriteByte((byte) type.GetArrayRank());
+                type = type.GetElementType();
+                if (type == null)
+                {
+                    throw new NotSupportedException();
+                }
+
+                WriteTypeInfo(stream, type);
             }
         }
 
-        private static void WriteGenericTypeInfo(Stream stream, Type type)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static void WriteGenericTypeInfo(Stream stream, Type type)
         {
             foreach (var typeArg in type.GenericTypeArguments)
             {
-                var asmIndex = Array.IndexOf(_Assemblies, type.Assembly) + 1;
-                if (asmIndex <= 0)
-                {
-                    throw new NotSupportedException($"Assembly not in list: {type.Assembly.FullName}");
-                }
-
-                stream.WriteByte((byte) asmIndex);
-                stream.Write(BitConverter.GetBytes(typeArg.MetadataToken));
-                if (typeArg.IsConstructedGenericType)
-                {
-                    WriteGenericTypeInfo(stream, typeArg);
-                }
+                WriteTypeInfo(stream, typeArg);
             }
         }
 
         public static Type ReadTypeInfo(Stream stream)
         {
-            var asmIndex = stream.ReadByte() - 1;
+            var buf = new byte[4];
+            stream.Read(buf);
+            var typeId = BitConverter.ToInt32(buf);
+            var asmIndex = (typeId >> 24) - 1;
             if (asmIndex < 0)
             {
                 return null;
             }
 
             var asm = _Assemblies[asmIndex];
-            var buf = new byte[4];
-            stream.Read(buf);
-            var typeId = BitConverter.ToInt32(buf);
-            if (typeId == 0x02000000)
+            typeId &= 0x00FFFFFF;
+            if (asmIndex == 0 && typeId == 0)
             {
                 var rank = stream.ReadByte();
                 var elemType = ReadTypeInfo(stream);
@@ -335,7 +376,10 @@ namespace Robust.Shared.Serialization
 
                 return rank == 1 ? elemType.MakeArrayType() : elemType.MakeArrayType(rank);
             }
+
+            typeId |= 0x02000000;
             var type = asm.ManifestModule.ResolveType(typeId);
+
             if (type.IsGenericTypeDefinition)
             {
                 var typeArgs = ReadGenericTypeInfo(stream, type);
@@ -345,21 +389,12 @@ namespace Robust.Shared.Serialization
             return type;
         }
 
-        private static IEnumerable<Type> ReadGenericTypeInfo(Stream stream, Type type)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static IEnumerable<Type> ReadGenericTypeInfo(Stream stream, Type type)
         {
             foreach (var _ in type.GetGenericArguments())
             {
-                var asmIndex = stream.ReadByte() - 1;
-                if (asmIndex < 0)
-                {
-                    throw new NotSupportedException("Can't have null generic type argument.");
-                }
-
-                var asm = _Assemblies[asmIndex];
-                var buf = new byte[4];
-                stream.Read(buf);
-                var typeId = BitConverter.ToInt32(buf);
-                var resolved = asm.ManifestModule.ResolveType(typeId);
+                var resolved = ReadTypeInfo(stream);
                 if (resolved.IsGenericTypeDefinition)
                 {
                     var moreTypeArgs = ReadGenericTypeInfo(stream, resolved);
