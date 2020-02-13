@@ -28,7 +28,7 @@ namespace Robust.Shared.Serialization
             stream = new RecordingStreamWrapper(stream, _traceWriter);
         }
 
-        #if DEBUG
+#if DEBUG
         [Conditional("TRACE_IO")]
         private void RecordSerialized(Stream stream)
         {
@@ -61,12 +61,12 @@ namespace Robust.Shared.Serialization
                 TraceWriteLine($"Deserializing: {BitConverter.ToString(ms.ToArray()).Replace('-', ' ')}");
             }
         }
-        #else
+#else
         [Conditional("NEVER")]
         private void RecordDeserializing(Stream stream) {}
         [Conditional("NEVER")]
         private void RecordSerialized(Stream stream) {}
-        #endif
+#endif
 
         public void Serialize(Stream stream, object obj)
         {

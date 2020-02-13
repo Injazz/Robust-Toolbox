@@ -190,7 +190,7 @@ namespace Lidgren.Network
 				return;
 #if DEBUG
 			if (m_outgoingMessagesPool.Contains(msg))
-				throw new NetException("Recyling already recycled message! Thread race?");
+				throw new NetException("Recycling already recycled message! Thread race?");
 #endif
 
 			byte[] storage = msg.m_data;

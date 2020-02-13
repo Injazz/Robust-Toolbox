@@ -325,6 +325,13 @@ namespace Robust.Shared.Serialization
                     .ToArray();
 
                 _inheritorCache.Add(type, inheritorTypes);
+
+                if (inheritorTypes.Length == 0)
+                {
+                    Debug.WriteLine($"{type.FullName} might need to be sealed.");
+                    _traceWriter.WriteLine($"{type.FullName} might need to be sealed.");
+                }
+
                 return inheritorTypes;
             }
 
@@ -435,41 +442,6 @@ namespace Robust.Shared.Serialization
             return e;
         }
 
-        // see https://github.com/dotnet/runtime/blob/master/src/coreclr/src/vm/field.h class FieldDesc ~ line 75
-        [StructLayout(LayoutKind.Sequential)]
-        private ref struct FieldDesc
-        {
-
-            private unsafe void* mt;
-
-            private uint bits1;
-
-            private uint bits2;
-
-            public int Offset => (int) (bits2 & 0x07FFFFFFu);
-
-        }
-
-        private static unsafe object BoxingFieldReader<T>(void* p) where T : unmanaged => *(T*) p;
-
-        private unsafe delegate object BoxingFieldReaderDelegate(void* p);
-
-        private static readonly Dictionary<Type, BoxingFieldReaderDelegate> _boxingFieldReaderDelegates =
-            new Dictionary<Type, BoxingFieldReaderDelegate>();
-
-        private static BoxingFieldReaderDelegate GetBoxingFieldReader(Type t)
-        {
-            if (!_boxingFieldReaderDelegates.TryGetValue(t, out var d))
-            {
-                d = CreateDelegate<BoxingFieldReaderDelegate, RobustSerializer>(
-                    BindingFlags.NonPublic | BindingFlags.Static,
-                    nameof(BoxingFieldReader), t);
-                _boxingFieldReaderDelegates[t] = d;
-            }
-
-            return d;
-        }
-
         private Dictionary<Type, (MethodInfo Value, MethodInfo HasValue)> _nullableGetters =
             new Dictionary<Type, (MethodInfo, MethodInfo)>();
 
@@ -568,8 +540,7 @@ namespace Robust.Shared.Serialization
                         //var typedRef = TypedReference.MakeTypedReference(obj, new[] {field});
                         var ft = field.FieldType;
                         var isValType = ft.IsValueType;
-                        object value;
-                        value = field.GetValue(obj);
+                        var value = field.GetValue(obj);
 
                         if (!isValType)
                         {
@@ -1219,7 +1190,7 @@ namespace Robust.Shared.Serialization
 
         private delegate object NullableConstructor(object value);
 
-        private IDictionary<Type, NullableConstructor> _nullableConstructors = new Dictionary<Type, NullableConstructor>();
+        private readonly IDictionary<Type, NullableConstructor> _nullableConstructors = new Dictionary<Type, NullableConstructor>();
 
         private object ReadNullable(Stream stream, Type type, List<object> backRefs)
         {

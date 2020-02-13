@@ -226,6 +226,8 @@ namespace Robust.Shared.IoC
                 _container.Value.Register(attr.ContractType, attr.ConcreteType);
                 return;
             }
+
+            throw new InvalidOperationException($"No IoC registration for {interfaceType.Name} on {assembly}.");
         }
     }
 
