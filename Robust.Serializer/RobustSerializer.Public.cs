@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using K4os.Compression.LZ4;
+using K4os.Compression.LZ4.Streams;
 using Newtonsoft.Json.Serialization;
 
 namespace Robust.Shared.Serialization
@@ -10,6 +12,8 @@ namespace Robust.Shared.Serialization
 
     public partial class RobustSerializer
     {
+
+        private static readonly LZ4EncoderSettings Lz4EncoderSettings = new LZ4EncoderSettings {BlockSize = 4 * 1024 * 1024, ChainBlocks = true, CompressionLevel = LZ4Level.L09_HC, ExtraMemory = 12 * 1024 * 1024};
 
         public void Initialize()
         {
@@ -70,38 +74,47 @@ namespace Robust.Shared.Serialization
 
         public void Serialize(Stream stream, object obj)
         {
-            AttachRecordingStreamWrapper(ref stream);
+            using var encodeStream = LZ4Stream.Encode(stream, Lz4EncoderSettings, leaveOpen:true);
 
-            Serialize(stream, obj, new List<object>());
+            //AttachRecordingStreamWrapper(ref stream);
 
-            RecordSerialized(stream);
+            Serialize(encodeStream, obj, new List<object>());
+
+            //RecordSerialized(stream);
         }
 
         public void Serialize<T>(Stream stream, T obj)
         {
-            AttachRecordingStreamWrapper(ref stream);
+            using var encodeStream = LZ4Stream.Encode(stream, Lz4EncoderSettings, leaveOpen:true);
 
-            Serialize(stream, obj, new List<object>());
+            //AttachRecordingStreamWrapper(ref stream);
 
-            RecordSerialized(stream);
+            Serialize(encodeStream, obj, new List<object>());
+
+            //RecordSerialized(stream);
         }
 
         public T Deserialize<T>(Stream stream)
         {
-            RecordDeserializing(stream);
+            using var decodeStream = LZ4Stream.Decode(stream, leaveOpen:true);
 
-            AttachRecordingStreamWrapper(ref stream);
+            //RecordDeserializing(stream);
 
-            return Deserialize<T>(stream, new List<object>());
+            //AttachRecordingStreamWrapper(ref stream);
+
+            return Deserialize<T>(decodeStream, new List<object>());
         }
 
         public object Deserialize(Stream stream)
         {
-            RecordDeserializing(stream);
+            using var decodeStream = LZ4Stream.Decode(stream, leaveOpen:true);
 
-            AttachRecordingStreamWrapper(ref stream);
+            //RecordDeserializing(stream);
 
-            return Deserialize(stream, new List<object>());
+            //AttachRecordingStreamWrapper(ref stream);
+
+            return Deserialize(decodeStream, new List<object>());
+
         }
 
         public bool CanSerialize(Type type) =>
