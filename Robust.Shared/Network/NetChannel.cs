@@ -108,8 +108,7 @@ namespace Robust.Shared.Network
                 {
                     LeaveOpen = true,
                     BufferSize = 4 * 1024 * 1024,
-                    DecodeFlags = LzmaDecodingFlag.Concatenated,
-                    MemLimit = 32 * 1024 * 1024,
+                    DecodeFlags = LzmaDecodingFlag.Concatenated | LzmaDecodingFlag.IgnoreCheck
                 })
             );
 
@@ -118,10 +117,10 @@ namespace Robust.Shared.Network
                 new XZStream(StatsGatherer, new XZCompressOptions
                 {
                     LeaveOpen = true,
-                    BufferSize = 4 * 1024 * 1024,
-                    Check = LzmaCheck.Crc32,
+                    BufferSize = 8 * 1024 * 1024,
+                    Check = LzmaCheck.None,
                     ExtremeFlag = false,
-                    Level = LzmaCompLevel.Level6
+                    Level = LzmaCompLevel.Level1
                 })
             );
 
@@ -168,13 +167,12 @@ namespace Robust.Shared.Network
         public void FlushOutbound(bool force = false)
         {
             var timing = IoCManager.Resolve<IGameTiming>();
-            var currentTick = timing.CurTick.Value + 1;
+            var currentTick = timing.CurTick.Value;
             var realTime = timing.RealTime;
             if (force)
             {
                 _lastFlushedTick = (int) currentTick;
                 _lastFlushedTime = realTime;
-                BackChannelOutbound.Flush();
                 BackChannelOutbound.Flush();
             }
 
@@ -182,7 +180,6 @@ namespace Robust.Shared.Network
             {
                 _lastFlushedTick = (int) currentTick;
                 _lastFlushedTime = realTime;
-                BackChannelOutbound.Flush();
                 BackChannelOutbound.Flush();
             }
             else if (currentTick <= _lastFlushedTick)
@@ -194,7 +191,6 @@ namespace Robust.Shared.Network
                     Logger.WarningS("net.tcp", $"Flushing outbound stream for an overly long tick: {currentTick}");
                     _lastFlushedTick = (int) currentTick;
                     _lastFlushedTime = realTime;
-                    BackChannelOutbound.Flush();
                     BackChannelOutbound.Flush();
                 }
             }
