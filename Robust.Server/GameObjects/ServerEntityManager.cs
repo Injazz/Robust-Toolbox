@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using Robust.Server.Interfaces.GameObjects;
+using Robust.Server.Interfaces.Player;
 using Robust.Server.Interfaces.Timing;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameObjects.Components;
@@ -17,7 +19,7 @@ namespace Robust.Server.GameObjects
     /// <summary>
     /// Manager for entities -- controls things like template loading and instantiation
     /// </summary>
-    public class ServerEntityManager : EntityManager, IServerEntityManagerInternal
+    public sealed class ServerEntityManager : EntityManager, IServerEntityManagerInternal
     {
         #region IEntityManager Members
 
@@ -102,6 +104,88 @@ namespace Robust.Server.GameObjects
                     continue;
 
                 stateEntities.Add(GetEntityState(ComponentManager, entity.Uid, fromTick));
+            }
+
+            // no point sending an empty collection
+            return stateEntities.Count == 0 ? default : stateEntities;
+        }
+
+
+        private readonly IDictionary<IPlayerSession, IDictionary<EntityUid, GameTick>> _playerLastSeen
+            = new Dictionary<IPlayerSession, IDictionary<EntityUid, GameTick>>();
+
+        private GameTick GetLastSeenTick(IPlayerSession player, EntityUid uid)
+        {
+            if (!_playerLastSeen.TryGetValue(player, out var lastSeen))
+            {
+                lastSeen = new Dictionary<EntityUid, GameTick>();
+                _playerLastSeen[player] = lastSeen;
+            }
+
+            if (!lastSeen.TryGetValue(uid, out var tick))
+            {
+                tick = GameTick.Zero;
+            }
+
+            return tick;
+        }
+        private void SetLastSeenTick(IPlayerSession player, EntityUid uid, GameTick tick)
+        {
+            if (!_playerLastSeen.TryGetValue(player, out var lastSeen))
+            {
+                lastSeen = new Dictionary<EntityUid, GameTick>();
+                _playerLastSeen[player] = lastSeen;
+            }
+
+            lastSeen[uid] = tick;
+        }
+
+        private IEnumerable<IEntity> IncludeParents(IEnumerable<IEntity> children)
+        {
+            var set = new HashSet<IEntity>();
+            foreach (var child in children)
+            {
+                var ent = child;
+
+                do
+                {
+                    set.Add(ent);
+                    ent = ent.Transform.Parent?.Owner;
+                } while (ent != null && !ent.Deleted);
+            }
+
+            return set;
+        }
+
+        /// <inheritdoc />
+        public List<EntityState> UpdatePlayerSeenEntityStates(GameTick fromTick, IPlayerSession player, float range)
+        {
+
+            var transform = player.AttachedEntity.Transform;
+            var point = transform.WorldPosition;
+            var mapId = transform.MapID;
+
+            var stateEntities = new List<EntityState>();
+            foreach (var entity in IncludeParents(GetEntitiesInRange(mapId, point, range)))
+            {
+                DebugTools.Assert(entity.Initialized && !entity.Deleted);
+
+                var lastChange = entity.LastModifiedTick;
+
+                var uid = entity.Uid;
+
+                var lastSeen = GetLastSeenTick(player, uid);
+
+                if (lastChange < lastSeen && lastChange <= fromTick)
+                {
+                    continue;
+                }
+
+                var entityState = GetEntityState(ComponentManager, uid, lastSeen);
+
+                stateEntities.Add(entityState);
+
+                SetLastSeenTick(player, uid, fromTick);
             }
 
             // no point sending an empty collection

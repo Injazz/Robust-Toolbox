@@ -3,11 +3,13 @@ using Robust.Server.Interfaces.GameObjects;
 using Robust.Server.Interfaces.GameState;
 using Robust.Server.Interfaces.Player;
 using Robust.Shared.Enums;
+using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
 using Robust.Shared.Interfaces.Map;
 using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Timing;
 using Robust.Shared.IoC;
+using Robust.Shared.Maths;
 using Robust.Shared.Network;
 using Robust.Shared.Network.Messages;
 using Robust.Shared.Timing;
@@ -39,7 +41,7 @@ namespace Robust.Server.GameStates
             _networkManager.Connected += HandleClientConnected;
             _networkManager.Disconnect += HandleClientDisconnect;
         }
-        
+
         private void HandleClientConnected(object sender, NetChannelArgs e)
         {
             if(!_ackedStates.ContainsKey(e.Channel.ConnectionId))
@@ -47,7 +49,7 @@ namespace Robust.Server.GameStates
             else
                 _ackedStates[e.Channel.ConnectionId] = GameTick.Zero;
         }
-        
+
         private void HandleClientDisconnect(object sender, NetChannelArgs e)
         {
             if (_ackedStates.ContainsKey(e.Channel.ConnectionId))
@@ -104,9 +106,12 @@ namespace Robust.Server.GameStates
                 {
                     DebugTools.Assert("Why does this channel not have an entry?");
                 }
-                
+
                 //TODO: Cull these based on client view rectangle, remember the issues with transform parenting
-                var entities = _entityManager.GetEntityStates(lastAck);
+
+                var entities = lastAck == GameTick.Zero
+                    ? _entityManager.GetEntityStates(lastAck)
+                    : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, 4f);
                 var players = _playerManager.GetPlayerStates(lastAck);
                 var deletions = _entityManager.GetDeletedEntities(lastAck);
                 var mapData = _mapManager.GetStateData(lastAck);

@@ -2,6 +2,7 @@
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Map;
 using System.Collections.Generic;
+using Robust.Server.Interfaces.Player;
 using Robust.Shared.Maths;
 using Robust.Shared.Timing;
 
@@ -13,6 +14,11 @@ namespace Robust.Server.Interfaces.GameObjects
         ///     Gets all entity states that have been modified after and including the provided tick.
         /// </summary>
         List<EntityState> GetEntityStates(GameTick fromTick);
+
+        /// <summary>
+        ///     Gets all entity states within an AABB that have been modified after and including the provided tick.
+        /// </summary>
+        public List<EntityState> UpdatePlayerSeenEntityStates(GameTick fromTick, IPlayerSession player, float range);
 
         // Keep track of deleted entities so we can sync deletions with the client.
         /// <summary>
