@@ -77,6 +77,7 @@ namespace Robust.Shared.Network
         /// </summary>
         private readonly List<NetPeer> _netPeers = new List<NetPeer>();
 
+        // Client connect happens during status changed and such callbacks, so we need to defer deletion of these.
         private readonly List<NetPeer> _toCleanNetPeers = new List<NetPeer>();
 
         /// <inheritdoc />
@@ -196,6 +197,7 @@ namespace Robust.Shared.Network
             {
                 // That's comma-separated, btw.
                 _config.RegisterCVar("net.bindto", "0.0.0.0,::", CVar.ARCHIVE);
+                _config.RegisterCVar("net.dualstack", false, CVar.ARCHIVE);
             }
 
 #if DEBUG
@@ -215,6 +217,9 @@ namespace Robust.Shared.Network
             DebugTools.Assert(!IsRunning);
 
             var binds = _config.GetCVar<string>("net.bindto").Split(',');
+            var dualStack = _config.GetCVar<bool>("net.dualstack");
+
+            var foundIpv6 = false;
 
             foreach (var bindAddress in binds)
             {
@@ -242,7 +247,13 @@ namespace Robust.Shared.Network
                 config.Port = Port;
                 config.EnableMessageType(NetIncomingMessageType.ConnectionApproval);
 
-                var peer = new NetPeer(config);
+                if (address.AddressFamily == AddressFamily.InterNetworkV6 && dualStack)
+                {
+                    foundIpv6 = true;
+                    config.DualStack = true;
+                }
+
+                var peer = IsServer ? (NetPeer) new NetServer(config) : new NetClient(config);
                 peer.Start();
                 _netPeers.Add(peer);
             }
@@ -252,6 +263,12 @@ namespace Robust.Shared.Network
                 Logger.WarningS("net",
                     "Exactly 0 addresses have been bound to, nothing will be able to connect to the server.");
             }
+
+            if (!foundIpv6 && dualStack)
+            {
+                Logger.WarningS("net",
+                    "IPv6 Dual Stack is enabled but no IPv6 addresses have been bound to. This will not work.");
+        }
         }
 
         public void Dispose()
@@ -569,13 +586,13 @@ namespace Robust.Shared.Network
             var sender = msg.SenderConnection;
             msg.ReadByte();
             var reason = msg.ReadString();
-            Logger.DebugS("net", $"{sender.RemoteEndPoint}: Status changed to {sender.Status}");
+            Logger.DebugS("net", $"{sender.RemoteEndPoint}: Status changed to {sender.Status}, reason: {reason}");
 
             if (_awaitingStatusChange.TryGetValue(sender, out var resume))
             {
+                _awaitingStatusChange.Remove(sender);
                 resume.Item1.Dispose();
                 resume.Item2.SetResult(reason);
-                _awaitingStatusChange.Remove(sender);
                 return;
             }
 
@@ -747,7 +764,14 @@ namespace Robust.Shared.Network
             _channels.Remove(connection);
 
             if (IsClient)
+            {
+                connection.Peer.Shutdown(reason);
+                _toCleanNetPeers.Add(connection.Peer);
                 _strings.Reset();
+
+                _cancelConnectTokenSource?.Cancel();
+                _clientConnectionState = ClientConnectionState.NotConnecting;
+        }
         }
 
         /// <inheritdoc />
