@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using JetBrains.Annotations;
 using NUnit.Framework;
 using Robust.Shared.GameObjects;
@@ -469,14 +470,30 @@ namespace Robust.UnitTesting.Shared.GameObjects
             const int sourceBytes = sizeof(char) * sourceSize;
             var source = new char[sourceSize];
 
-            fixed (char* p = &source[0])
+
+            string normalized;
+            for (;;)
             {
-                RandomNumberGenerator.Fill(new Span<byte>(p, sourceBytes));
+                fixed (char* p = &source[0])
+                {
+                    RandomNumberGenerator.Fill(new Span<byte>(p, sourceBytes));
+                }
+
+                try
+                {
+                    normalized = new string(source).Normalize();
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+
+                break;
             }
 
             using (var stream = new MemoryStream())
             {
-                serializer.Serialize(stream, new string(source));
+                serializer.Serialize(stream, normalized);
                 array = stream.ToArray();
             }
 
@@ -485,7 +502,7 @@ namespace Robust.UnitTesting.Shared.GameObjects
             using (var stream = new MemoryStream(array, false))
             {
                 var payload = (string) serializer.Deserialize(stream);
-                Assert.AreEqual(source, payload.ToCharArray());
+                Assert.AreEqual(normalized, payload.ToCharArray());
             }
 
             Console.WriteLine($"Size in Bytes: {array.Length.ToString()} (overhead of {array.Length - sourceBytes + accountingForTypeAndSizeInfo})");
@@ -509,14 +526,29 @@ namespace Robust.UnitTesting.Shared.GameObjects
             const int sourceBytes = sizeof(char) * sourceSize;
             var source = new char[sourceSize];
 
-            fixed (char* p = &source[0])
+            string normalized;
+            for (;;)
             {
-                RandomNumberGenerator.Fill(new Span<byte>(p, sourceBytes));
+                fixed (char* p = &source[0])
+                {
+                    RandomNumberGenerator.Fill(new Span<byte>(p, sourceBytes));
+                }
+
+                try
+                {
+                    normalized = new string(source).Normalize();
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+
+                break;
             }
 
             using (var stream = new MemoryStream())
             {
-                serializer.Serialize(stream, new [] { new string(source) });
+                serializer.Serialize(stream, new [] { normalized });
                 array = stream.ToArray();
             }
 
@@ -525,7 +557,7 @@ namespace Robust.UnitTesting.Shared.GameObjects
             using (var stream = new MemoryStream(array, false))
             {
                 var payload = (string[]) serializer.Deserialize(stream);
-                Assert.AreEqual(source, payload[0].ToCharArray());
+                Assert.AreEqual(normalized, payload[0].ToCharArray());
             }
 
             Console.WriteLine($"Size in Bytes: {array.Length.ToString()} (overhead of {array.Length - sourceBytes + accountingForTypeAndSizeInfo})");
