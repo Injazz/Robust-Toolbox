@@ -1,16 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using Robust.Server.Interfaces.GameObjects;
 using Robust.Server.Interfaces.Player;
 using Robust.Server.Interfaces.Timing;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameObjects.Components;
+using Robust.Shared.GameObjects.Components.Transform;
 using Robust.Shared.Interfaces.GameObjects;
+using Robust.Shared.Interfaces.GameObjects.Components;
 using Robust.Shared.Interfaces.Map;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
+using Robust.Shared.Physics;
 using Robust.Shared.Timing;
 using Robust.Shared.Utility;
 
@@ -21,6 +25,9 @@ namespace Robust.Server.GameObjects
     /// </summary>
     public sealed class ServerEntityManager : EntityManager, IServerEntityManagerInternal
     {
+
+        private const float MinimumMotionForMovers = 1 / 128f;
+
         #region IEntityManager Members
 
 #pragma warning disable 649
@@ -110,9 +117,24 @@ namespace Robust.Server.GameObjects
             return stateEntities.Count == 0 ? default : stateEntities;
         }
 
+        private readonly IDictionary<IPlayerSession, ISet<EntityUid>> _seenMovers
+            = new Dictionary<IPlayerSession, ISet<EntityUid>>();
+
+        private ISet<EntityUid> GetSeenMovers(IPlayerSession player)
+        {
+            if (!_seenMovers.TryGetValue(player, out var movers))
+            {
+                movers = new SortedSet<EntityUid>();
+                _seenMovers.Add(player, movers);
+            }
+
+            return movers;
+        }
 
         private readonly IDictionary<IPlayerSession, IDictionary<EntityUid, GameTick>> _playerLastSeen
             = new Dictionary<IPlayerSession, IDictionary<EntityUid, GameTick>>();
+
+        private static readonly Vector2 Vector2NaN = new Vector2(float.NaN, float.NaN);
 
         private GameTick GetLastSeenTick(IPlayerSession player, EntityUid uid)
         {
@@ -165,7 +187,46 @@ namespace Robust.Server.GameObjects
             var point = transform.WorldPosition;
             var mapId = transform.MapID;
 
+            var seenMovers = GetSeenMovers(player);
+
+            var includedEnts = new HashSet<EntityUid>();
             var stateEntities = new List<EntityState>();
+
+            foreach (var uid in seenMovers.ToList())
+            {
+                if (!TryGetEntity(uid, out var entity))
+                {
+                    seenMovers.Remove(uid);
+                    continue;
+                }
+
+                if (entity.TryGetComponent(out PhysicsComponent body))
+                {
+
+                    if (body.LinearVelocity.EqualsApprox(Vector2.Zero, MinimumMotionForMovers))
+                    {
+                        seenMovers.Remove(uid);
+                    }
+
+                }
+
+                var entityState = GetEntityState(ComponentManager, uid, fromTick);
+                stateEntities.Add(entityState);
+
+                if ((entity.Transform.WorldPosition - point).Length > range)
+                {
+                    var idx = entityState.ComponentStates.FindIndex(x => x is TransformComponent.TransformComponentState);
+                    if (idx != -1)
+                    {
+                        var oldState = (TransformComponent.TransformComponentState) entityState.ComponentStates[idx];
+                        var newState = new TransformComponent.TransformComponentState(Vector2NaN, oldState.Rotation, oldState.ParentID);
+                        entityState.ComponentStates[idx] = newState;
+                    }
+                }
+
+                includedEnts.Add(uid);
+            }
+
             foreach (var entity in IncludeParents(GetEntitiesInRange(mapId, point, range)))
             {
                 DebugTools.Assert(entity.Initialized && !entity.Deleted);
@@ -174,6 +235,11 @@ namespace Robust.Server.GameObjects
 
                 var uid = entity.Uid;
 
+                if (includedEnts.Contains(uid))
+                {
+                    continue;
+                }
+
                 var lastSeen = GetLastSeenTick(player, uid);
 
                 if (lastChange < lastSeen && lastChange <= fromTick)
@@ -181,11 +247,25 @@ namespace Robust.Server.GameObjects
                     continue;
                 }
 
-                var entityState = GetEntityState(ComponentManager, uid, lastSeen);
+                includedEnts.Add(uid);
 
-                stateEntities.Add(entityState);
+                stateEntities.Add(GetEntityState(ComponentManager, uid, lastSeen));
 
                 SetLastSeenTick(player, uid, fromTick);
+
+                if (!entity.TryGetComponent(out PhysicsComponent body))
+                {
+                    continue;
+                }
+
+                if (!body.LinearVelocity.EqualsApprox(Vector2.Zero, MinimumMotionForMovers))
+                {
+                    seenMovers.Add(uid);
+                }
+                else
+                {
+                    seenMovers.Remove(uid);
+                }
             }
 
             // no point sending an empty collection

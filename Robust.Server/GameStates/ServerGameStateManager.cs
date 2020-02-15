@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Robust.Server.Interfaces.GameObjects;
 using Robust.Server.Interfaces.GameState;
 using Robust.Server.Interfaces.Player;
@@ -82,6 +83,8 @@ namespace Robust.Server.GameStates
                 DebugTools.Assert("How did the client send us an ack without being connected?");
         }
 
+        private IDictionary<IPlayerSession, IList<EntityState>> _lastEntityStates = new Dictionary<IPlayerSession, IList<EntityState>>();
+
         /// <inheritdoc />
         public void SendGameStateUpdate()
         {
@@ -100,7 +103,9 @@ namespace Robust.Server.GameStates
             {
                 var session = _playerManager.GetSessionByChannel(channel);
                 if (session == null || session.Status != SessionStatus.InGame) // client still joining, maybe iterate over sessions instead?
+                {
                     continue;
+                }
 
                 if (!_ackedStates.TryGetValue(channel.ConnectionId, out var lastAck))
                 {
@@ -111,10 +116,14 @@ namespace Robust.Server.GameStates
 
                 var entities = lastAck == GameTick.Zero
                     ? _entityManager.GetEntityStates(lastAck)
-                    : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, 4f);
+                    : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, 3f);
                 var players = _playerManager.GetPlayerStates(lastAck);
                 var deletions = _entityManager.GetDeletedEntities(lastAck);
                 var mapData = _mapManager.GetStateData(lastAck);
+
+                // TODO: check for teleporters
+
+                _lastEntityStates[session] = entities;
 
                 // lastAck varies with each client based on lag and such, we can't just make 1 global state and send it to everyone
                 var state = new GameState(lastAck, _gameTiming.CurTick, entities, players, deletions, mapData);
