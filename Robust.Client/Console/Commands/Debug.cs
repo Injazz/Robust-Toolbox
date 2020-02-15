@@ -671,6 +671,7 @@ namespace Robust.Client.Console.Commands
 
     }
 
+    /*
     internal class SerializeStatsCommand : IConsoleCommand
     {
 
@@ -692,6 +693,7 @@ namespace Robust.Client.Console.Commands
         }
 
     }
+    */
 
     internal class ChunkInfoCommand : IConsoleCommand
     {

@@ -16,7 +16,7 @@ using Robust.Shared.Interfaces.Serialization;
 namespace Robust.Shared.Serialization
 {
 
-    public partial class RobustSerializer : IRobustSerializer
+    public partial class BwoinkSerializer : IRobustSerializer
     {
 
         private static readonly LZ4EncoderSettings Lz4EncoderSettings = new LZ4EncoderSettings {BlockSize = 4 * 1024 * 1024, ChainBlocks = true, CompressionLevel = LZ4Level.L09_HC, ExtraMemory = 12 * 1024 * 1024};
@@ -237,7 +237,7 @@ namespace Robust.Shared.Serialization
 
         private readonly ReadOnlyCollection<string> _stringTableWrapper;
 
-        public RobustSerializer()
+        public BwoinkSerializer()
         {
             _stringTableWrapper = new ReadOnlyCollection<string>(_stringTable);
         }

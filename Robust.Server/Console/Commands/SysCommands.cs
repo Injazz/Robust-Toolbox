@@ -188,6 +188,7 @@ namespace Robust.Server.Console.Commands
 
     }
 
+    /*
     internal class SerializeStatsCommand : IClientCommand
     {
 
@@ -207,6 +208,7 @@ namespace Robust.Server.Console.Commands
         }
 
     }
+    */
 
     internal sealed class MemCommand : IClientCommand
     {
