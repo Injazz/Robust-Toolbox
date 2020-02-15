@@ -22,7 +22,7 @@ namespace Robust.Shared.Console
         //Client console group data
         public ConGroup ClientConGroup = new ConGroup();
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer)
+        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
         {
             ClientConGroup.Index = buffer.ReadInt32();
             ClientConGroup.Name = buffer.ReadString();
@@ -37,7 +37,7 @@ namespace Robust.Shared.Console
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
         {
             buffer.Write(ClientConGroup.Index);
             buffer.Write(ClientConGroup.Name);

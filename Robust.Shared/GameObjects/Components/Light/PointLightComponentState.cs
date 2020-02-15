@@ -7,6 +7,8 @@ namespace Robust.Shared.GameObjects
     [Serializable, NetSerializable]
     public class PointLightComponentState : ComponentState
     {
+        public override uint NetID => NetIDs.POINT_LIGHT;
+
         public readonly Color Color;
         public readonly bool Enabled;
 
@@ -14,7 +16,6 @@ namespace Robust.Shared.GameObjects
         public readonly Vector2 Offset;
 
         public PointLightComponentState(bool enabled, Color color, float radius, Vector2 offset)
-            : base(NetIDs.POINT_LIGHT)
         {
             Enabled = enabled;
             Color = color;

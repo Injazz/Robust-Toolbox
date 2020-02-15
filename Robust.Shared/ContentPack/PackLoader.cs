@@ -1,5 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using ICSharpCode.SharpZipLib.Zip;
 using Robust.Shared.Log;
 using Robust.Shared.Utility;
@@ -69,6 +71,14 @@ namespace Robust.Shared.ContentPack
                         yield return new ResourcePath(zipEntry.Name).ToRelativePath();
                 }
             }
+
+
+            public IEnumerable<string> GetPathStrings() => _zip
+                .Cast<ZipEntry>()
+                .Where(zipEntry => zipEntry.IsFile)
+                .Select(zipEntry => new ResourcePath(zipEntry.Name)
+                    .ToRelativePath().ToString());
+
         }
     }
 }

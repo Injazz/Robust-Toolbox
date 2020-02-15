@@ -52,12 +52,12 @@ namespace Robust.UnitTesting.Shared.GameObjects
         {
             var container = new DependencyCollection();
             container.Register<IReflectionManager, ServerReflectionManager>();
-            container.Register<IRobustSerializer, RobustSerializer>();
+            container.Register<IRobustSerializer, BwoinkSerializer>();
             container.BuildGraph();
 
             container.Resolve<IReflectionManager>().LoadAssemblies(AppDomain.CurrentDomain.GetAssemblyByName("Robust.Shared"));
 
-            var serializer = (RobustSerializer)container.Resolve<IRobustSerializer>();
+            var serializer = (BwoinkSerializer)container.Resolve<IRobustSerializer>();
             serializer.Initialize();
 
             byte[] array;

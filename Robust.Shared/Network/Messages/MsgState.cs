@@ -19,7 +19,7 @@ namespace Robust.Shared.Network.Messages
 
         public GameState State { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer)
+        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
         {
             MsgSize = buffer.LengthBytes;
             var length = buffer.ReadVariableInt32();
@@ -27,15 +27,17 @@ namespace Robust.Shared.Network.Messages
             using (var stateStream = new MemoryStream(stateData))
             {
                 var serializer = IoCManager.Resolve<IRobustSerializer>();
+                serializer.UseCompression = isCompressed;
                 State = serializer.Deserialize<GameState>(stateStream);
             }
 
             State.PayloadSize = length;
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
         {
             var serializer = IoCManager.Resolve<IRobustSerializer>();
+            serializer.UseCompression = !willBeCompressed;
             using (var stateStream = new MemoryStream())
             {
                 DebugTools.Assert(stateStream.Length <= Int32.MaxValue);

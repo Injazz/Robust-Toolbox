@@ -34,8 +34,8 @@ namespace Robust.UnitTesting.Shared.GameObjects
         public void ComponentChangedSerialized()
         {
 
-            RobustSerializer._traceWriter = Console.Out;
-            var serializer = new RobustSerializer {Tracing = true};
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 
@@ -84,8 +84,8 @@ namespace Robust.UnitTesting.Shared.GameObjects
         [Test]
         public void ComponentChangedSerialized2()
         {
-            RobustSerializer._traceWriter = Console.Out;
-            var serializer = new RobustSerializer {Tracing = true};
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 
@@ -148,8 +148,8 @@ namespace Robust.UnitTesting.Shared.GameObjects
         [Test]
         public void ItemValueTupleSerialized1()
         {
-            RobustSerializer._traceWriter = Console.Out;
-            var serializer = new RobustSerializer {Tracing = true};
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 
@@ -182,8 +182,8 @@ namespace Robust.UnitTesting.Shared.GameObjects
         [Test]
         public unsafe void RoundTripInt()
         {
-            RobustSerializer._traceWriter = Console.Out;
-            var serializer = new RobustSerializer {Tracing = true};
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 
@@ -220,8 +220,8 @@ namespace Robust.UnitTesting.Shared.GameObjects
         [Test]
         public unsafe void RoundTripNullableInt()
         {
-            RobustSerializer._traceWriter = Console.Out;
-            var serializer = new RobustSerializer {Tracing = true};
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 
@@ -261,8 +261,8 @@ namespace Robust.UnitTesting.Shared.GameObjects
         [Test]
         public unsafe void RoundTripNullableIntNull()
         {
-            RobustSerializer._traceWriter = Console.Out;
-            var serializer = new RobustSerializer {Tracing = true};
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 
@@ -306,10 +306,10 @@ namespace Robust.UnitTesting.Shared.GameObjects
         [Test]
         public unsafe void RoundTripNullableIntNullStruct()
         {
-            RobustSerializer._traceWriter = Console.Out;
+            BwoinkSerializer.TraceWriter = Console.Out;
             RobustNetTypeInfo.RegisterAssembly(typeof(NullableWrapper<>).Assembly);
 
-            var serializer = new RobustSerializer {Tracing = true};
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 
@@ -345,8 +345,8 @@ namespace Robust.UnitTesting.Shared.GameObjects
         [Test]
         public unsafe void RoundTripIntArray()
         {
-            RobustSerializer._traceWriter = Console.Out;
-            var serializer = new RobustSerializer {Tracing = true};
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 
@@ -383,8 +383,8 @@ namespace Robust.UnitTesting.Shared.GameObjects
         [Test]
         public unsafe void RoundTripBoxedIntArray()
         {
-            RobustSerializer._traceWriter = Console.Out;
-            var serializer = new RobustSerializer {Tracing = true};
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 
@@ -423,8 +423,8 @@ namespace Robust.UnitTesting.Shared.GameObjects
         [Test]
         public unsafe void RoundTripString()
         {
-            RobustSerializer._traceWriter = Console.Out;
-            var serializer = new RobustSerializer {Tracing = true};
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
 
             serializer.Initialize();
 

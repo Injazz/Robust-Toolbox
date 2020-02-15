@@ -72,10 +72,10 @@ namespace Robust.Shared.GameObjects.Components.Map
     [Serializable, NetSerializable]
     internal class MapComponentState : ComponentState
     {
+        public sealed override uint NetID => NetIDs.MAP_MAP;
         public MapId MapId { get; }
 
         public MapComponentState(MapId mapId)
-            : base(NetIDs.MAP_MAP)
         {
             MapId = mapId;
         }

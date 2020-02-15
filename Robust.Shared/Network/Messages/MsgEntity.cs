@@ -27,7 +27,7 @@ namespace Robust.Shared.Network.Messages
         public EntityUid EntityUid { get; set; }
         public uint NetId { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer)
+        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
         {
             Type = (EntityMessageType)buffer.ReadByte();
 
@@ -36,6 +36,7 @@ namespace Robust.Shared.Network.Messages
                 case EntityMessageType.SystemMessage:
                 {
                     var serializer = IoCManager.Resolve<IRobustSerializer>();
+                    serializer.UseCompression = isCompressed;
                     int messageLength = buffer.ReadInt32();
                     using (var stream = new MemoryStream(buffer.ReadBytes(messageLength)))
                     {
@@ -48,6 +49,7 @@ namespace Robust.Shared.Network.Messages
                     EntityUid = new EntityUid(buffer.ReadInt32());
 
                     var serializer = IoCManager.Resolve<IRobustSerializer>();
+                    serializer.UseCompression = isCompressed;
                     int messageLength = buffer.ReadInt32();
                     using (var stream = new MemoryStream(buffer.ReadBytes(messageLength)))
                     {
@@ -61,6 +63,7 @@ namespace Robust.Shared.Network.Messages
                     NetId = buffer.ReadUInt32();
 
                     var serializer = IoCManager.Resolve<IRobustSerializer>();
+                    serializer.UseCompression = isCompressed;
                     int messageLength = buffer.ReadInt32();
                     using (var stream = new MemoryStream(buffer.ReadBytes(messageLength)))
                     {
@@ -71,7 +74,7 @@ namespace Robust.Shared.Network.Messages
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
         {
             buffer.Write((byte)Type);
 
@@ -80,6 +83,7 @@ namespace Robust.Shared.Network.Messages
                 case EntityMessageType.SystemMessage:
                 {
                     var serializer = IoCManager.Resolve<IRobustSerializer>();
+                    serializer.UseCompression = !willBeCompressed;
                     using (var stream = new MemoryStream())
                     {
                         serializer.Serialize(stream, SystemMessage);
@@ -93,6 +97,7 @@ namespace Robust.Shared.Network.Messages
                     buffer.Write((int)EntityUid);
 
                     var serializer = IoCManager.Resolve<IRobustSerializer>();
+                    serializer.UseCompression = !willBeCompressed;
                     using (var stream = new MemoryStream())
                     {
                         serializer.Serialize(stream, EntityMessage);
@@ -107,6 +112,7 @@ namespace Robust.Shared.Network.Messages
                     buffer.Write(NetId);
 
                     var serializer = IoCManager.Resolve<IRobustSerializer>();
+                    serializer.UseCompression = !willBeCompressed;
                     using (var stream = new MemoryStream())
                     {
                         serializer.Serialize(stream, ComponentMessage);

@@ -79,12 +79,14 @@ namespace Robust.Shared.Network
         /// Deserializes the NetIncomingMessage into this NetMessage class.
         /// </summary>
         /// <param name="buffer">The buffer of the raw incoming packet.</param>
-        public abstract void ReadFromBuffer(NetIncomingMessage buffer);
+        /// <param name="isCompressed"></param>
+        public abstract void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false);
 
         /// <summary>
         /// Serializes this NetMessage into a new NetOutgoingMessage.
         /// </summary>
         /// <param name="buffer">The buffer of the new packet being serialized.</param>
-        public abstract void WriteToBuffer(NetOutgoingMessage buffer);
+        /// <param name="willBeCompressed"></param>
+        public abstract void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false);
     }
 }

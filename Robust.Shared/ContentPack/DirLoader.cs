@@ -8,14 +8,18 @@ using Robust.Shared.Utility;
 
 namespace Robust.Shared.ContentPack
 {
+
     internal partial class ResourceManager
     {
+
         /// <summary>
         ///     Holds info about a directory that is mounted in the VFS.
         /// </summary>
         class DirLoader : IContentRoot
         {
+
             private readonly DirectoryInfo _directory;
+
             private readonly ISawmill _sawmill;
 
             /// <summary>
@@ -76,6 +80,25 @@ namespace Robust.Shared.ContentPack
                 }
             }
 
+            public IEnumerable<string> GetPathStrings() => GetPathStrings(_directory);
+
+            private IEnumerable<string> GetPathStrings(DirectoryInfo dir)
+            {
+                foreach (var fi in dir.GetFiles())
+                {
+                    yield return ResourcePath.FromRelativeSystemPath(fi.FullName.Substring(_directory.FullName.Length))
+                        .ToString();
+                }
+
+                foreach (var di in dir.GetDirectories())
+                {
+                    foreach (var s in GetPathStrings(di))
+                    {
+                        yield return s;
+                    }
+                }
+            }
+
             [Conditional("DEBUG")]
             private void CheckPathCasing(ResourcePath path)
             {
@@ -119,11 +142,14 @@ namespace Robust.Shared.ContentPack
                     if (mismatch)
                     {
                         _sawmill.Warning("Path '{0}' has mismatching case from file on disk ('{1}'). " +
-                                        "This can cause loading failures on certain file system configurations " +
-                                        "and should be corrected.", path, diskPath);
+                            "This can cause loading failures on certain file system configurations " +
+                            "and should be corrected.", path, diskPath);
                     }
                 });
             }
+
         }
+
     }
+
 }

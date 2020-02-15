@@ -4,7 +4,9 @@ using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Robust.Shared.Interfaces.Configuration;
+using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Resources;
+using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
 using Robust.Shared.Utility;
@@ -91,7 +93,16 @@ namespace Robust.Shared.ContentPack
 
             //create new PackLoader
             var loader = new PackLoader(packInfo);
+
             loader.Mount();
+
+            var netMan = IoCManager.Resolve<INetManager>();
+            if (netMan.IsServer)
+            {
+                var szr = IoCManager.Resolve<IRobustSerializer>();
+                szr.RegisterStrings(loader.GetPathStrings());
+            }
+
             _contentRootsLock.EnterWriteLock();
             try
             {
@@ -124,7 +135,17 @@ namespace Robust.Shared.ContentPack
             }
 
             var loader = new DirLoader(pathInfo, Logger.GetSawmill("res"));
+
             loader.Mount();
+
+            var netMan = IoCManager.Resolve<INetManager>();
+            if (netMan.IsServer)
+            {
+                var szr = IoCManager.Resolve<IRobustSerializer>();
+                szr.RegisterStrings(loader.GetPathStrings());
+            }
+
+
             _contentRootsLock.EnterWriteLock();
             try
             {

@@ -29,7 +29,7 @@ namespace Robust.Shared.Network.Messages
         public string ObjType { get; set; }
         public string AlignOption { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer)
+        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
         {
             PlaceType = (PlacementManagerMessage) buffer.ReadByte();
             switch (PlaceType)
@@ -59,7 +59,7 @@ namespace Robust.Shared.Network.Messages
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
         {
             buffer.Write((byte)PlaceType);
             switch (PlaceType)

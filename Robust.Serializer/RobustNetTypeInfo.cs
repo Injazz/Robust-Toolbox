@@ -2,7 +2,6 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -11,7 +10,6 @@ using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
-using System.Runtime.Serialization;
 using System.Security.Cryptography;
 using JetBrains.Annotations;
 
@@ -19,7 +17,7 @@ namespace Robust.Shared.Serialization
 {
 
     [PublicAPI]
-    public static class RobustNetTypeInfo
+    public static partial class RobustNetTypeInfo
     {
 
         // this is static readonly so dependencies will not have const prop,
@@ -29,7 +27,7 @@ namespace Robust.Shared.Serialization
         // TODO: use IoC?
         private static Assembly[] _Assemblies =
         {
-            AssemblyLoadContext.Default.Assemblies.FirstOrDefault(a => a.GetName().Name == "System.Private.CoreLib"), // used for net type ids but not for strings
+            null,
             AssemblyLoadContext.Default.Assemblies.FirstOrDefault(a => a.GetName().Name == "Robust.Shared"), // should not be null
             AssemblyLoadContext.Default.Assemblies.FirstOrDefault(a => a.GetName().Name == "Content.Shared"), // can be null during tests
             null, // reserved for back refs
@@ -38,11 +36,20 @@ namespace Robust.Shared.Serialization
 
         private static readonly bool[] _AssemblyValidStrings =
         {
-            false, // System.Private.CoreLib
+            false, // reserved
             true, // Robust.Shared
             true, // Content.Shared
             false, // back references
             true // user loaded content e.g. yaml
+        };
+
+        private static readonly Dictionary<int, byte[]>[] _CustomSymbolTableHashes =
+        {
+            null,
+            null,
+            null,
+            null,
+            null,
         };
 
         public static int GetAssemblyCount() => _Assemblies.Count(a => a != null);
@@ -282,19 +289,19 @@ namespace Robust.Shared.Serialization
             }
 
             var strDict = AssemblyStringDictionaries[asmIndex];
-            
+
             if (strDict == null || strDict.IdToString.Count == 0)
             {
                 throw new InvalidOperationException($"No strings are registered for assembly {asmIndex} ({_Assemblies[asmIndex]?.ToString() ?? "reserved"})");
             }
-            
+
             if (stringId.StringIndex > strDict.IdToString.Count)
             {
                 throw new InvalidOperationException($"String is {stringId} missing from assembly {asmIndex} ({_Assemblies[asmIndex]?.ToString() ?? "reserved"})");
             }
 
             s = strDict.IdToString[stringId.StringIndex];
-            
+
             return true;
         }
 
@@ -313,19 +320,61 @@ namespace Robust.Shared.Serialization
 
         public static void WriteTypeInfo(Stream stream, [NotNull] Type type)
         {
+            //Trace.WriteLine($"Writing Type Info: {type.FullName}");
             // recursion for generic types by loop to avoid stack frames
             var asm = type.Assembly;
+
             var asmIndex = Array.IndexOf(_Assemblies, asm) + 1;
+
+            var skipGenericInfo = false;
+            byte[] bytes;
             if (asmIndex <= 0)
             {
-                throw new NotSupportedException($"Assembly not in list: {asm.FullName}");
+                if (_CustomSymbolIndex.TryGetValue(type, out var typeId))
+                {
+                    ++typeId;
+                    skipGenericInfo = true;
+                }
+                else
+                {
+                    if (type.IsArray)
+                    {
+                        typeId = 0;
+                    }
+                    else if (type.IsConstructedGenericType)
+                    {
+                        if (_CustomSymbolIndex.TryGetValue(type.GetGenericTypeDefinition(), out typeId))
+                        {
+                            ++typeId;
+                        }
+                        else
+                        {
+                            throw new NotSupportedException($"No type index mapping for {type.FullName}");
+                        }
+                    }
+                    else
+                    {
+                        throw new NotSupportedException($"No type index mapping for {type.FullName}");
+                    }
+                }
+
+                bytes = BitConverter.GetBytes(typeId);
+                bytes[3] = 1;
+            }
+            else
+            {
+                var typeId = type.MetadataToken;
+                bytes = BitConverter.GetBytes(typeId);
+                bytes[3] = (byte) asmIndex;
             }
 
-            var typeId = type.MetadataToken;
-            var bytes = BitConverter.GetBytes(typeId);
-            bytes[3] = (byte) asmIndex;
-            //stream.WriteByte((byte) asmIndex);
-            stream.Write(bytes); // could maybe drop the high byte, should always be same?
+            stream.Write(bytes);
+
+            if (skipGenericInfo)
+            {
+                return;
+            }
+
             if (type.IsConstructedGenericType)
             {
                 WriteGenericTypeInfo(stream, type);
@@ -352,7 +401,8 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        public static Type ReadTypeInfo(Stream stream)
+        public static Type
+            ReadTypeInfo(Stream stream)
         {
             var buf = new byte[4];
             stream.Read(buf);
@@ -363,29 +413,69 @@ namespace Robust.Shared.Serialization
                 return null;
             }
 
-            var asm = _Assemblies[asmIndex];
             typeId &= 0x00FFFFFF;
-            if (asmIndex == 0 && typeId == 0)
+
+            Type type;
+            if (asmIndex == 0)
             {
-                var rank = stream.ReadByte();
-                var elemType = ReadTypeInfo(stream);
-                if (rank > 1)
+                if (typeId == 0)
                 {
-                    throw new NotImplementedException();
+                    // array
+                    type = null;
+                }
+                else
+                {
+                    --typeId;
+
+                    if (_CustomSymbolTable.Length <= typeId)
+                    {
+                        throw new NotSupportedException($"No type mapping for type index {typeId}");
+                    }
+
+                    type = _CustomSymbolTable[typeId];
+                }
+            }
+            else
+            {
+                if (asmIndex >= _Assemblies.Length)
+                {
+                    throw new NotSupportedException($"Unknown assembly index {asmIndex}, likely corrupt data.");
                 }
 
-                return rank == 1 ? elemType.MakeArrayType() : elemType.MakeArrayType(rank);
+                var asm = _Assemblies[asmIndex];
+                if (asmIndex == 0 && typeId == 0)
+                {
+                    var rank = stream.ReadByte();
+                    var elemType = ReadTypeInfo(stream);
+                    if (rank > 1)
+                    {
+                        throw new NotImplementedException();
+                    }
+
+                    return rank == 1 ? elemType.MakeArrayType() : elemType.MakeArrayType(rank);
+                }
+
+                typeId |= 0x02000000;
+                type = asm.ManifestModule.ResolveType(typeId);
             }
 
-            typeId |= 0x02000000;
-            var type = asm.ManifestModule.ResolveType(typeId);
+            if (type == null)
+            {
+                var rank = stream.ReadByte();
 
-            if (type.IsGenericTypeDefinition)
+                var elemType = ReadTypeInfo(stream);
+
+                var arrayType = elemType.MakeArrayType(rank);
+
+                type = arrayType;
+            }
+            else if (type.IsGenericTypeDefinition)
             {
                 var typeArgs = ReadGenericTypeInfo(stream, type);
                 type = type.MakeGenericType(typeArgs.ToArray());
             }
 
+            //Trace.WriteLine($"Read Type Info: {type.FullName}");
             return type;
         }
 

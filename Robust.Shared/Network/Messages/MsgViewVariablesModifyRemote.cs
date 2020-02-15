@@ -34,9 +34,10 @@ namespace Robust.Shared.Network.Messages
         /// </summary>
         public object Value { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer)
+        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
         {
             var serializer = IoCManager.Resolve<IRobustSerializer>();
+            serializer.UseCompression = isCompressed;
             SessionId = buffer.ReadUInt32();
             {
                 var length = buffer.ReadInt32();
@@ -56,9 +57,10 @@ namespace Robust.Shared.Network.Messages
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
         {
             var serializer = IoCManager.Resolve<IRobustSerializer>();
+            serializer.UseCompression = !willBeCompressed;
             buffer.Write(SessionId);
             using (var stream = new MemoryStream())
             {

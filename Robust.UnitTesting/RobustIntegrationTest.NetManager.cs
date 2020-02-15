@@ -231,6 +231,11 @@ namespace Robust.UnitTesting
                 return (T) Activator.CreateInstance(typeof(T), (INetChannel) null);
             }
 
+            public void RegisterString(string str)
+            {
+                // TODO: ...
+            }
+
             public void DisconnectChannel(INetChannel channel, string reason)
             {
                 channel.Disconnect(reason);

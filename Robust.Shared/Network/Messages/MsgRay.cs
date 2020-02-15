@@ -21,14 +21,14 @@ namespace Robust.Shared.Network.Messages
         public Vector2 RayHit { get; set; }
         public bool DidHit { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer)
+        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
         {
             DidHit = buffer.ReadBoolean();
             RayOrigin = buffer.ReadVector2();
             RayHit = buffer.ReadVector2();
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
         {
             buffer.Write(DidHit);
             buffer.Write(RayOrigin);

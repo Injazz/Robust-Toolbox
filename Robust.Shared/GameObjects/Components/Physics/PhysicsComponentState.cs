@@ -10,6 +10,8 @@ namespace Robust.Shared.GameObjects
     [Serializable, NetSerializable]
     public class PhysicsComponentState : ComponentState
     {
+        public override uint NetID => NetIDs.PHYSICS;
+
         /// <summary>
         ///     Current mass of the entity, stored in grams.
         /// </summary>
@@ -26,7 +28,6 @@ namespace Robust.Shared.GameObjects
         /// <param name="mass">Current Mass of the entity.</param>
         /// <param name="velocity">Current Velocity of the entity.</param>
         public PhysicsComponentState(float mass, Vector2 velocity)
-            : base(NetIDs.PHYSICS)
         {
             Mass = (int) Math.Round(mass *1000); // rounds kg to nearest gram
             Velocity = velocity;

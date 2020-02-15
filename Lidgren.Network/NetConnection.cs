@@ -8,7 +8,7 @@ namespace Lidgren.Network
 	/// <summary>
 	/// Represents a connection to a remote peer
 	/// </summary>
-	[DebuggerDisplay("RemoteUniqueIdentifier={RemoteUniqueIdentifier} RemoteEndPoint={remoteEndPoint}")]
+	[DebuggerDisplay("RemoteUniqueIdentifier={"+nameof(RemoteUniqueIdentifier)+"} RemoteEndPoint={"+nameof(RemoteEndPoint)+"}")]
 	public partial class NetConnection
 	{
 		internal NetPeer m_peer;
@@ -288,6 +288,9 @@ namespace Lidgren.Network
 			NetException.Assert(m_sendBufferWritePtr > 0, "Encoded zero size message?");
 			NetException.Assert(m_sendBufferNumMessages > 0);
 		}
+
+		public bool WillBeQueued(int sz)
+			=> m_sendBufferWritePtr + sz > m_currentMTU;
 
 		/// <summary>
 		/// Send a message to this remote connection

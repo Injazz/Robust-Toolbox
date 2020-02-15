@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidgren.Network;
@@ -243,11 +245,42 @@ namespace Robust.Shared.Network
                 // Await response.
                 var response = await AwaitData(winningConnection, mainCancelToken);
                 var receivedUsername = response.ReadString();
-                var channel = new NetChannel(this, winningConnection, new NetSessionId(receivedUsername));
-                _channels.Add(winningConnection, channel);
+                var tcpClient = new TcpClient
+                {
+                    Client = new Socket(winningConnection.RemoteEndPoint.AddressFamily, SocketType.Stream, ProtocolType.IP)
+                    {
+                        ExclusiveAddressUse = false,
+                        NoDelay = true,
+                        SendBufferSize = 256 * 1024, // _config.GetCVar<int>("net.tcp.sendbuffersize")
+                        ReceiveBufferSize = 256 * 1024, // _config.GetCVar<int>("net.tcp.receivebuffersize")
+                        SendTimeout = 3 * 60 * 1000, // _config.GetCVar<int>("net.tcp.sendtimeout")
+                        ReceiveTimeout = 3* 60 * 1000, // _config.GetCVar<int>("net.tcp.receivetimeout")
+                        LingerState = new LingerOption(true,3 * 60) // _config.GetCVar<int>("net.tcp.lingertime")
+                    },
+                };
 
-                var confirmConnectionMsg = winningPeer.CreateMessage("ok");
+                var nonce = Guid.NewGuid();
+                var confirmConnectionMsg = winningPeer.CreateMessage("ok "+nonce );
                 winningPeer.SendMessage(confirmConnectionMsg, winningConnection, NetDeliveryMethod.ReliableOrdered);
+
+                Logger.InfoS("net.tcp", "Establishing connection.");
+                await tcpClient.ConnectAsync(winningConnection.RemoteEndPoint.Address, winningConnection.RemoteEndPoint.Port+1);
+                await using (var sw = new StreamWriter(tcpClient.GetStream(), Encoding.UTF8, 256, true))
+                {
+                    sw.WriteLine(nonce);
+                    await sw.FlushAsync();
+                }
+                using (var sr = new StreamReader(tcpClient.GetStream(), Encoding.UTF8, false, 256, true))
+                {
+                    if (ReadLineSafe(sr, 7, out var hitEol) != "welcome" && !hitEol)
+                    {
+                        Logger.ErrorS("net.tcp", "Connection failed handshake.");
+                        tcpClient.Close();
+                    }
+                }
+
+                var channel = new NetChannel(this, winningConnection, new NetSessionId(receivedUsername), tcpClient);
+                _channels.Add(winningConnection, channel);
             }
             catch (TaskCanceledException)
             {

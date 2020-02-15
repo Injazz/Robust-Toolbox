@@ -27,9 +27,10 @@ namespace Robust.Shared.GameObjects.Components.Appearance
         [Serializable, NetSerializable]
         protected class AppearanceComponentState : ComponentState
         {
+            public override uint NetID => NetIDs.APPEARANCE;
             public readonly Dictionary<object, object> Data;
 
-            public AppearanceComponentState(Dictionary<object, object> data) : base(NetIDs.APPEARANCE)
+            public AppearanceComponentState(Dictionary<object, object> data)
             {
                 Data = data;
             }

@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.Serialization;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidgren.Network;
@@ -14,10 +17,13 @@ using Robust.Shared.Interfaces.Configuration;
 using Robust.Shared.Interfaces.Network;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
+using Robust.Shared.Timing;
 using Robust.Shared.Utility;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace Robust.Shared.Network
 {
+
     /// <summary>
     ///     Callback for registered NetMessages.
     /// </summary>
@@ -35,6 +41,7 @@ namespace Robust.Shared.Network
     /// </summary>
     public partial class NetManager : IClientNetManager, IServerNetManager, IDisposable
     {
+
         private readonly Dictionary<Type, ProcessMessage> _callbacks = new Dictionary<Type, ProcessMessage>();
 
         /// <summary>
@@ -69,10 +76,13 @@ namespace Robust.Shared.Network
         ///     The list of network peers we are listening on.
         /// </summary>
         private readonly List<NetPeer> _netPeers = new List<NetPeer>();
+
         private readonly List<NetPeer> _toCleanNetPeers = new List<NetPeer>();
 
         /// <inheritdoc />
         public int Port => _config.GetCVar<int>("net.port");
+
+        public int TcpPort => Port + 1;
 
         /// <inheritdoc />
         public bool IsServer { get; private set; }
@@ -156,6 +166,10 @@ namespace Robust.Shared.Network
 
         private bool _initialized;
 
+        private List<TcpListener> _tcpListeners = new List<TcpListener>();
+
+        private Queue<(string Nonce, TcpClient Connection)> _tcpClients = new Queue<(string Nonce, TcpClient Connection)>();
+
         /// <inheritdoc />
         public void Initialize(bool isServer)
         {
@@ -209,6 +223,20 @@ namespace Robust.Shared.Network
                     throw new InvalidOperationException("Not a valid IPv4 or IPv6 address");
                 }
 
+                var listener = new TcpListener(new IPEndPoint(address, TcpPort))
+                {
+                    ExclusiveAddressUse = false
+                };
+                listener.Start();
+                listener.Server.NoDelay = true;
+                listener.Server.SendBufferSize = 256 * 1024; // _config.GetCVar<int>("net.tcp.sendbuffersize")
+                listener.Server.ReceiveBufferSize = 256 * 1024; // _config.GetCVar<int>("net.tcp.receivebuffersize")
+                listener.Server.SendTimeout = 3 * 60 * 1000; // _config.GetCVar<int>("net.tcp.sendtimeout")
+                listener.Server.ReceiveTimeout = 3 * 60 * 1000; // _config.GetCVar<int>("net.tcp.receivetimeout")
+                listener.Server.LingerState = new LingerOption(true, 3 * 60); // _config.GetCVar<int>("net.tcp.lingertime")
+
+                _tcpListeners.Add(listener);
+
                 var config = _getBaseNetPeerConfig();
                 config.LocalAddress = address;
                 config.Port = Port;
@@ -255,6 +283,28 @@ namespace Robust.Shared.Network
 
             _cancelConnectTokenSource?.Cancel();
             _clientConnectionState = ClientConnectionState.NotConnecting;
+        }
+
+        private static string ReadLineSafe(TextReader reader, int maxLineLength, out bool hitEol)
+        {
+            var line = new StringBuilder(maxLineLength);
+            int i;
+            hitEol = false;
+            while ((i = reader.Read()) > 0)
+            {
+                if (i == -1 || i == '\r' || i == '\n' || i == '\0')
+                {
+                    hitEol = true;
+                    break;
+                }
+
+                if (line.Append((char) i).Length >= maxLineLength)
+                {
+                    break;
+                }
+            }
+
+            return line.ToString();
         }
 
         public void ProcessPackets()
@@ -316,6 +366,107 @@ namespace Robust.Shared.Network
                 foreach (var peer in _toCleanNetPeers)
                 {
                     _netPeers.Remove(peer);
+                }
+            }
+
+            ProcessBackChannelPackets();
+
+            if (IsServer)
+            {
+                ProcessBackChannelConnections();
+            }
+        }
+
+        private void ProcessBackChannelPackets()
+        {
+            foreach (var (connection,channel) in _channels)
+            {
+                if (!channel.TcpClient.Connected)
+                {
+                    continue;
+                }
+
+                if (!channel.TcpClient.GetStream().DataAvailable)
+                {
+                    continue;
+                }
+
+                var backChannel = channel.BackChannelInbound;
+                var packetSize = BitConverter.ToInt32(backChannel.ReadExact(4));
+                if (packetSize <= 0 || packetSize > 12*1024*1024)
+                {
+                    // TODO: could we send a packet bigger than 12MB?
+                    throw new NotImplementedException();
+                }
+
+                var msg = (NetIncomingMessage) FormatterServices.GetUninitializedObject(typeof(NetIncomingMessage));
+                msg.LengthBytes = packetSize;
+                msg.Data = backChannel.ReadExact(packetSize);
+                // note: .MessageType will be Error, gaf?
+                DispatchNetMessage(msg, connection);
+            }
+        }
+
+        private void ProcessBackChannelConnections()
+        {
+            foreach (var listener in _tcpListeners)
+            {
+                if (listener.Pending())
+                {
+                    Logger.DebugS("net.tcp", $"Accepting new connection...");
+                    var client = listener.AcceptTcpClient();
+                    var ip = ((IPEndPoint) client.Client.RemoteEndPoint).Address;
+                    if (!_netPeers.Any(p => p.Connections.Any(c => c.RemoteEndPoint.Address.Equals(ip))))
+                    {
+                        Logger.DebugS("net.tcp", $"No existing clients have the same IP as incoming connection, closing.");
+                        client.Close();
+                    }
+                    else
+                    {
+                        Logger.InfoS("net.tcp", $"Connection from a client with the same IP: {ip}");
+                        client.Client.NoDelay = true;
+                        client.Client.SendBufferSize = 256 * 1024; // _config.GetCVar<int>("net.tcp.sendbuffersize")
+                        client.Client.ReceiveBufferSize = 256 * 1024; // _config.GetCVar<int>("net.tcp.receivebuffersize")
+                        client.Client.SendTimeout = 3 * 60 * 1000; // _config.GetCVar<int>("net.tcp.sendtimeout")
+                        client.Client.ReceiveTimeout = 3 * 60 * 1000; // _config.GetCVar<int>("net.tcp.receivetimeout")
+                        client.Client.LingerState = new LingerOption(true, 3 * 60); // _config.GetCVar<int>("net.tcp.lingertime")
+                        try
+                        {
+                            var stream = client.GetStream();
+                            string nonce;
+                            using (var sr = new StreamReader(stream, Encoding.UTF8, false, 256, true))
+                            {
+                                // TODO: limit read size
+                                nonce = ReadLineSafe(sr, 512, out var hitEol);
+                                if (!hitEol)
+                                {
+                                    nonce = null; // not acceptable
+                                }
+                            }
+
+                            if (!string.IsNullOrEmpty(nonce))
+                            {
+                                Logger.InfoS("net.tcp", $"Nonce {nonce} from {ip} read, queued for tie to NetChannel.");
+                                _tcpClients.Enqueue((nonce, client));
+                            }
+                            else
+                            {
+                                if (client.Connected)
+                                {
+                                    Logger.ErrorS("net.tcp", $"No nonce read from {ip}, closing.");
+                                    client.Close();
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            if (client.Connected)
+                            {
+                                Logger.ErrorS("net.tcp", $"Closing connection due to {ex.GetType().Name}: {ex.Message}");
+                                client.Close();
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -465,6 +616,7 @@ namespace Robust.Shared.Network
                 // In that case just ignore it.
                 return;
             }
+
             message.SenderConnection.Approve();
         }
 
@@ -524,21 +676,57 @@ namespace Robust.Shared.Network
                 return;
             }
 
-            if (okMsg.ReadString() != "ok")
+            var okMsgStr = okMsg.ReadString();
+            if (okMsgStr.StartsWith("ok ") && okMsgStr.Length > 3)
             {
-                connection.Disconnect("You should say ok.");
+                // Handshake complete!
+                var nonce = okMsgStr.Substring(3);
+                await HandleInitialHandshakeComplete(connection, nonce);
                 return;
             }
 
-            // Handshake complete!
-            HandleInitialHandshakeComplete(connection);
+            connection.Disconnect("You should say ok and then a TCP port number.");
         }
 
-        private void HandleInitialHandshakeComplete(NetConnection sender)
+        private async Task HandleInitialHandshakeComplete(NetConnection sender, string nonce)
         {
             var session = _assignedSessions[sender];
 
-            var channel = new NetChannel(this, sender, session);
+            var sw = new Stopwatch();
+            var ip = sender.RemoteEndPoint.Address;
+            TcpClient tcpClient = null;
+            try
+            {
+                do
+                {
+                    (_, tcpClient) = _tcpClients.FirstOrDefault(x =>
+                    {
+                        var client = x.Connection;
+                        var socket = client.Client;
+                        var clientIp = ((IPEndPoint) socket.RemoteEndPoint).Address;
+                        return x.Nonce == nonce && client.Connected
+                            && ip.Equals(clientIp);
+                    });
+                    await Task.Delay(16);
+                } while (sw.ElapsedMilliseconds < 1000 && tcpClient == null);
+
+                await using (var writer = new StreamWriter(tcpClient.GetStream(), Encoding.UTF8, 256, true))
+                {
+                    writer.WriteLine("welcome");
+                    await writer.FlushAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.ErrorS("net.tcp", $"Failed making handshake reply to accept connection for {ip}.");
+            }
+
+            if (tcpClient == null)
+            {
+                Logger.ErrorS("net.tcp", $"Unable to locate a connection {ip}.");
+            }
+
+            var channel = new NetChannel(this, sender, session, tcpClient);
             _channels.Add(sender, channel);
 
             _strings.SendFullTable(channel);
@@ -568,9 +756,11 @@ namespace Robust.Shared.Network
             channel.Disconnect(reason);
         }
 
-        private bool DispatchNetMessage(NetIncomingMessage msg)
+        private bool DispatchNetMessage(NetIncomingMessage msg, NetConnection senderConnection = null)
         {
-            var peer = msg.SenderConnection.Peer;
+            if (senderConnection == null)
+                senderConnection = msg.SenderConnection;
+            var peer = senderConnection.Peer;
             if (peer.Status == NetPeerStatus.ShutdownRequested)
                 return true;
 
@@ -580,10 +770,10 @@ namespace Robust.Shared.Network
             if (!IsConnected)
                 return true;
 
-            if (_awaitingData.TryGetValue(msg.SenderConnection, out var info))
+            if (_awaitingData.TryGetValue(senderConnection, out var info))
             {
                 var (cancel, tcs) = info;
-                _awaitingData.Remove(msg.SenderConnection);
+                _awaitingData.Remove(senderConnection);
                 cancel.Dispose();
                 tcs.TrySetResult(msg);
                 return false;
@@ -591,7 +781,7 @@ namespace Robust.Shared.Network
 
             if (msg.LengthBytes < 1)
             {
-                Logger.WarningS("net", $"{msg.SenderConnection.RemoteEndPoint}: Received empty packet.");
+                Logger.WarningS("net", $"{senderConnection.RemoteEndPoint}: Received empty packet.");
                 return true;
             }
 
@@ -601,14 +791,14 @@ namespace Robust.Shared.Network
             {
                 if (!CacheNetMsgFunction(id))
                 {
-                    Logger.WarningS("net", $"{msg.SenderConnection.RemoteEndPoint}: Got net message with invalid ID {id}.");
+                    Logger.WarningS("net", $"{senderConnection.RemoteEndPoint}: Got net message with invalid ID {id}.");
                     return true;
                 }
             }
 
             var (func, type) = _netMsgFunctions[id];
 
-            var channel = GetChannel(msg.SenderConnection);
+            var channel = GetChannel(senderConnection);
             var instance = func(channel);
             instance.MsgChannel = channel;
 
@@ -619,13 +809,13 @@ namespace Robust.Shared.Network
             catch (Exception e) // yes, we want to catch ALL exeptions for security
             {
                 Logger.WarningS("net",
-                    $"{msg.SenderConnection.RemoteEndPoint}: Failed to deserialize {type.Name} packet: {e.Message}");
+                    $"{senderConnection.RemoteEndPoint}: Failed to deserialize {type.Name} packet: {e.Message}");
             }
 
             if (!_callbacks.TryGetValue(type, out ProcessMessage callback))
             {
                 Logger.WarningS("net",
-                    $"{msg.SenderConnection.RemoteEndPoint}: Received packet {id}:{type}, but callback was not registered.");
+                    $"{senderConnection.RemoteEndPoint}: Received packet {id}:{type}, but callback was not registered.");
                 return true;
             }
 
@@ -649,7 +839,7 @@ namespace Robust.Shared.Network
 
             DebugTools.AssertNotNull(constructor);
 
-            var dynamicMethod = new DynamicMethod($"_netMsg<>{id}", typeof(NetMessage), new[]{typeof(INetChannel)}, packetType, false);
+            var dynamicMethod = new DynamicMethod($"_netMsg<>{id}", typeof(NetMessage), new[] {typeof(INetChannel)}, packetType, false);
 
             dynamicMethod.DefineParameter(1, ParameterAttributes.In, "channel");
 
@@ -688,6 +878,7 @@ namespace Robust.Shared.Network
                 CacheBlankFunction(typeof(T));
                 func = _blankNetMsgFunctions[typeof(T)];
             }
+
             return (T) func();
         }
 
@@ -708,7 +899,7 @@ namespace Robust.Shared.Network
             _blankNetMsgFunctions.Add(type, @delegate);
         }
 
-        private NetOutgoingMessage BuildMessage(NetMessage message, NetPeer peer)
+        private NetOutgoingMessage BuildMessage(NetMessage message, NetPeer peer, bool willBeCompressed = false)
         {
             var packet = peer.CreateMessage(4);
 
@@ -717,7 +908,7 @@ namespace Robust.Shared.Network
                     $"[NET] No string in table with name {message.MsgName}. Was it registered?");
 
             packet.Write((byte) msgId);
-            message.WriteToBuffer(packet);
+            message.WriteToBuffer(packet, willBeCompressed);
             return packet;
         }
 
@@ -749,9 +940,22 @@ namespace Robust.Shared.Network
             if (!(recipient is NetChannel channel))
                 throw new ArgumentException($"Not of type {typeof(NetChannel).FullName}", nameof(recipient));
 
-            var peer = channel.Connection.Peer;
+            var connection = channel.Connection;
+            var peer = connection.Peer;
+
             var packet = BuildMessage(message, peer);
-            peer.SendMessage(packet, channel.Connection, NetDeliveryMethod.ReliableOrdered);
+
+            var packetSize = packet.LengthBytes;
+            if (connection.WillBeQueued(packetSize))
+            {
+                var backChannel = channel.BackChannelOutbound;
+                backChannel.Write(BitConverter.GetBytes(packetSize));
+                backChannel.Write(packet.Data, 0, packetSize);
+                backChannel.Flush();
+            }
+            else {
+                peer.SendMessage(packet, connection, NetDeliveryMethod.ReliableOrdered);
+            }
         }
 
         /// <inheritdoc />
@@ -844,6 +1048,7 @@ namespace Robust.Shared.Network
 
         private enum ClientConnectionState
         {
+
             /// <summary>
             ///     We are not connected and not trying to get connected either. Quite lonely huh.
             /// </summary>
@@ -868,11 +1073,13 @@ namespace Robust.Shared.Network
             ///     Connection is solid and handshake is done go wild.
             /// </summary>
             Connected
+
         }
 
         [Serializable]
         public class ClientDisconnectedException : Exception
         {
+
             public ClientDisconnectedException()
             {
             }
@@ -890,7 +1097,9 @@ namespace Robust.Shared.Network
                 StreamingContext context) : base(info, context)
             {
             }
+
         }
+
     }
 
     /// <summary>
@@ -898,10 +1107,12 @@ namespace Robust.Shared.Network
     /// </summary>
     public class NetManagerException : Exception
     {
+
         public NetManagerException(string message)
             : base(message)
         {
         }
+
     }
 
     /// <summary>
@@ -909,6 +1120,7 @@ namespace Robust.Shared.Network
     /// </summary>
     public struct NetworkStats
     {
+
         /// <summary>
         ///     Total sent bytes.
         /// </summary>
@@ -947,5 +1159,7 @@ namespace Robust.Shared.Network
             SentPackets = statistics.SentPackets;
             ReceivedPackets = statistics.ReceivedPackets;
         }
+
     }
+
 }

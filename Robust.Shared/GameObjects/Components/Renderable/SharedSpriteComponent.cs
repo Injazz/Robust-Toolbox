@@ -20,6 +20,8 @@ namespace Robust.Shared.GameObjects.Components.Renderable
         [Serializable, NetSerializable]
         protected class SpriteComponentState : ComponentState
         {
+            public sealed override uint NetID => NetIDs.SPRITE;
+
             public readonly bool Visible;
             public readonly DrawDepth DrawDepth;
             public readonly Vector2 Scale;
@@ -42,7 +44,6 @@ namespace Robust.Shared.GameObjects.Components.Renderable
                 string baseRsiPath,
                 List<PrototypeLayerData> layers,
                 uint renderOrder)
-                : base(NetIDs.SPRITE)
             {
                 Visible = visible;
                 DrawDepth = drawDepth;

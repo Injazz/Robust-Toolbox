@@ -279,7 +279,7 @@ namespace Robust.Shared.Network
         }
 
         /// <inheritdoc />
-        public override void ReadFromBuffer(NetIncomingMessage buffer)
+        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
         {
             var count = buffer.ReadUInt32();
             Entries = new Entry[count];
@@ -291,7 +291,7 @@ namespace Robust.Shared.Network
         }
 
         /// <inheritdoc />
-        public override void WriteToBuffer(NetOutgoingMessage buffer)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
         {
             if (Entries == null)
                 throw new InvalidOperationException("Entries is null!");

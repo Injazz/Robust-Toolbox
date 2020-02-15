@@ -53,7 +53,6 @@ namespace Robust.Shared.Serialization
             _writer.WriteLine();
             _writer.Flush();
 
-            /*
             const int relevantStackFrameDepth = 5;
             for (var i = 1; i <= relevantStackFrameDepth; ++i)
             {
@@ -62,7 +61,6 @@ namespace Robust.Shared.Serialization
                 var line = sf.GetFileLineNumber();
                 _writer.WriteLine($"\tfrom {method.DeclaringType?.Name ?? "_"}.{method.Name}:{line}");
             }
-            */
 
             _lastReport = newPos;
         }

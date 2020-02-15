@@ -16,28 +16,46 @@ using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
 using Robust.Shared.Serialization;
 
-[module: IoCRegister(typeof(IRobustSerializer), typeof(RobustSerializer))]
+//[module: IoCRegister(typeof(IRobustSerializer), typeof(RobustSerializer))]
 
 namespace Robust.Shared.Serialization
 {
 
     using static RobustNetTypeInfo;
 
-    public partial class RobustSerializer : IRobustSerializer
+    public sealed partial class BwoinkSerializer
     {
 
         // TRACE is set on release, so relying on DEBUG
 
 #if DEBUG
-        internal bool Tracing = false;
+
+        private bool _tracing = false;
+
+        internal bool Tracing
+        {
+            get => Debugger.IsAttached || _tracing;
+            set => _tracing = value;
+        }
 #endif
 
-        internal static TextWriter _traceWriter = new StreamWriter(
-            File.Open($"robust-serializer.trace", FileMode.OpenOrCreate, FileAccess.Write),
+        //internal static TextWriter _traceWriter = new TraceWriter();
+        private static Lazy<TextWriter> _lazyTraceWriter = new Lazy<TextWriter>(() => new StreamWriter(
+            File.Open("robust-serializer.trace", FileMode.Create, FileAccess.Write),
             Encoding.UTF8, 65536, false)
         {
             AutoFlush = false
-        };
+        }, LazyThreadSafetyMode.ExecutionAndPublication);
+
+        private static TextWriter _traceWriter;
+
+        private static TraceWriter TraceWriterInstance = new TraceWriter();
+
+        internal static TextWriter TraceWriter
+        {
+            get => _traceWriter ?? _lazyTraceWriter.Value;
+            set => _traceWriter = value;
+        }
 
         [Conditional("DEBUG")]
         private void TraceWriteLine(string msg)
@@ -57,8 +75,8 @@ namespace Robust.Shared.Serialization
 
             //Trace.WriteLine(formatted);
             //System.Console.WriteLine(formatted);
-            _traceWriter.WriteLine(formatted);
-            _traceWriter.Flush();
+            TraceWriter.WriteLine(formatted);
+            TraceWriter.Flush();
         }
 
         [Conditional("DEBUG")]
@@ -328,8 +346,8 @@ namespace Robust.Shared.Serialization
 
                 if (inheritorTypes.Length == 0)
                 {
-                    Debug.WriteLine($"{type.FullName} might need to be sealed.");
-                    _traceWriter.WriteLine($"{type.FullName} might need to be sealed.");
+                    // TraceWriteLine is not static
+                    Trace.WriteLine($"{type.FullName} might need to be sealed.");
                 }
 
                 return inheritorTypes;
@@ -359,7 +377,7 @@ namespace Robust.Shared.Serialization
             return 0;
         }
 
-        internal static IEnumerable<T> ReadGenericEnumerableGeneric<T>(RobustSerializer szr, Stream stream, List<object> backRefs, StrongBox<int> lengthBox)
+        internal static IEnumerable<T> ReadGenericEnumerableGeneric<T>(BwoinkSerializer szr, Stream stream, List<object> backRefs, StrongBox<int> lengthBox)
         {
             var buf = new byte[4];
             if (stream.Read(buf) == 0)
@@ -381,7 +399,7 @@ namespace Robust.Shared.Serialization
             return ReadGenericEnumerableGenericInternal<T>(szr, stream, backRefs, len);
         }
 
-        internal static IEnumerable<T> ReadGenericEnumerableGenericInternal<T>(RobustSerializer szr, Stream stream, List<object> backRefs, int len)
+        internal static IEnumerable<T> ReadGenericEnumerableGenericInternal<T>(BwoinkSerializer szr, Stream stream, List<object> backRefs, int len)
         {
             var type = typeof(T);
             var inheritorTypes = GetInheritorTypes(type);
@@ -422,7 +440,7 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        private delegate IEnumerable ReadGenericEnumerableDelegate(RobustSerializer szr, Stream stream, List<object> backRefs, StrongBox<int> lengthBox);
+        private delegate IEnumerable ReadGenericEnumerableDelegate(BwoinkSerializer szr, Stream stream, List<object> backRefs, StrongBox<int> lengthBox);
 
         private IDictionary<Type, ReadGenericEnumerableDelegate> _readGenericEnumerableDelegateCache =
             new Dictionary<Type, ReadGenericEnumerableDelegate>();
@@ -431,7 +449,7 @@ namespace Robust.Shared.Serialization
         {
             if (!_readGenericEnumerableDelegateCache.TryGetValue(type, out var dlg))
             {
-                dlg = CreateDelegate<ReadGenericEnumerableDelegate, RobustSerializer>(
+                dlg = CreateDelegate<ReadGenericEnumerableDelegate, BwoinkSerializer>(
                     BindingFlags.NonPublic | BindingFlags.Static,
                     nameof(ReadGenericEnumerableGeneric), type);
             }
@@ -712,7 +730,7 @@ namespace Robust.Shared.Serialization
         {
             if (!_createValueTypeDelegateCache.TryGetValue(type, out var dlg))
             {
-                dlg = CreateDelegate<CreateValueTypeDelegate, RobustSerializer>(
+                dlg = CreateDelegate<CreateValueTypeDelegate, BwoinkSerializer>(
                     BindingFlags.NonPublic | BindingFlags.Static,
                     "CreateValueTypeGeneric",
                     type
@@ -1206,7 +1224,7 @@ namespace Robust.Shared.Serialization
 
             if (!_nullableConstructors.TryGetValue(type, out var ctor))
             {
-                ctor = CreateDelegate<NullableConstructor, RobustSerializer>(
+                ctor = CreateDelegate<NullableConstructor, BwoinkSerializer>(
                     BindingFlags.NonPublic | BindingFlags.Static,
                     nameof(NullableConstructorGeneric), type.GenericTypeArguments[0]);
                 _nullableConstructors.Add(type, ctor);
