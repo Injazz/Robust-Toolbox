@@ -401,8 +401,7 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        public static Type
-            ReadTypeInfo(Stream stream)
+        public static Type ReadTypeInfo(Stream stream)
         {
             var buf = new byte[4];
             stream.Read(buf);
@@ -465,7 +464,7 @@ namespace Robust.Shared.Serialization
 
                 var elemType = ReadTypeInfo(stream);
 
-                var arrayType = elemType.MakeArrayType(rank);
+                var arrayType = rank == 1 ? elemType.MakeArrayType() : elemType.MakeArrayType(rank);
 
                 type = arrayType;
             }
