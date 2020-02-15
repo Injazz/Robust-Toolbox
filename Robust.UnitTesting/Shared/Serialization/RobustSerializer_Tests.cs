@@ -454,6 +454,84 @@ namespace Robust.UnitTesting.Shared.GameObjects
             Console.WriteLine(BitConverter.ToString(array).Replace('-', ' '));
         }
 
+        [Test]
+        public unsafe void RoundTripUniqueString()
+        {
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
+
+            serializer.Initialize();
+
+            byte[] array;
+
+            const int sourceSize = 10;
+            const int accountingForTypeAndSizeInfo = 4 + 4;
+            const int sourceBytes = sizeof(char) * sourceSize;
+            var source = new char[sourceSize];
+
+            fixed (char* p = &source[0])
+            {
+                RandomNumberGenerator.Fill(new Span<byte>(p, sourceBytes));
+            }
+
+            using (var stream = new MemoryStream())
+            {
+                serializer.Serialize(stream, new string(source));
+                array = stream.ToArray();
+            }
+
+            Assert.IsNotEmpty(array);
+
+            using (var stream = new MemoryStream(array, false))
+            {
+                var payload = (string) serializer.Deserialize(stream);
+                Assert.AreEqual(source, payload.ToCharArray());
+            }
+
+            Console.WriteLine($"Size in Bytes: {array.Length.ToString()} (overhead of {array.Length - sourceBytes + accountingForTypeAndSizeInfo})");
+
+            Console.WriteLine(BitConverter.ToString(array).Replace('-', ' '));
+        }
+
+
+        [Test]
+        public unsafe void RoundTripUniqueStringInArray()
+        {
+            BwoinkSerializer.TraceWriter = Console.Out;
+            var serializer = new BwoinkSerializer {Tracing = true};
+
+            serializer.Initialize();
+
+            byte[] array;
+
+            const int sourceSize = 10;
+            const int accountingForTypeAndSizeInfo = 4 + 4;
+            const int sourceBytes = sizeof(char) * sourceSize;
+            var source = new char[sourceSize];
+
+            fixed (char* p = &source[0])
+            {
+                RandomNumberGenerator.Fill(new Span<byte>(p, sourceBytes));
+            }
+
+            using (var stream = new MemoryStream())
+            {
+                serializer.Serialize(stream, new [] { new string(source) });
+                array = stream.ToArray();
+            }
+
+            Assert.IsNotEmpty(array);
+
+            using (var stream = new MemoryStream(array, false))
+            {
+                var payload = (string[]) serializer.Deserialize(stream);
+                Assert.AreEqual(source, payload[0].ToCharArray());
+            }
+
+            Console.WriteLine($"Size in Bytes: {array.Length.ToString()} (overhead of {array.Length - sourceBytes + accountingForTypeAndSizeInfo})");
+
+            Console.WriteLine(BitConverter.ToString(array).Replace('-', ' '));
+        }
     }
 
 }

@@ -307,6 +307,24 @@ namespace Robust.UnitTesting
                 public NetSessionId SessionId { get; }
                 public short Ping => default;
 
+                public long BackChannelBytesSent
+                    => throw new NotImplementedException();
+
+                public long BackChannelBytesReceived
+                    => throw new NotImplementedException();
+
+                public long BackChannelBytesSentCompressed
+                    => throw new NotImplementedException();
+
+                public long BackChannelBytesReceivedCompressed
+                    => throw new NotImplementedException();
+
+                public bool BackChannelConnected
+                    => throw new NotImplementedException();
+
+                public int BackChannelDataAvailable
+                    => throw new NotImplementedException();
+
                 public IntegrationNetChannel(IntegrationNetManager owner, ChannelWriter<object> otherChannel, int uid,
                     NetSessionId sessionId)
                 {
@@ -336,6 +354,13 @@ namespace Robust.UnitTesting
                 {
                     OtherChannel.TryWrite(new DisconnectMessage(RemoteUid));
                 }
+
+                public void BackChannelWrite(byte[] buffer, int offset, int length)
+                    => throw new NotImplementedException();
+
+                public byte[] BackChannelFill(byte[] buffer, ref int read)
+                    => throw new NotImplementedException();
+
             }
 
             private sealed class ConnectMessage
