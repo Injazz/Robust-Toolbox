@@ -97,7 +97,7 @@ namespace Robust.Shared.IoC
         /// If true, do not throw an <see cref="InvalidOperationException"/> if an interface is already registered,
         /// replace the current implementation instead.
         /// </param>
-        public static void RegisterInstance<TInterface>(object implementation, bool overwrite = false)
+        public static void RegisterInstance<TInterface>(TInterface implementation, bool overwrite = false)
         {
             DebugTools.Assert(_container.IsValueCreated, NoContextAssert);
 

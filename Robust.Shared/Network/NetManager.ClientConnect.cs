@@ -8,6 +8,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidgren.Network;
+using Robust.Shared.Interfaces.Timing;
+using Robust.Shared.IoC;
 using Robust.Shared.Log;
 using Robust.Shared.Utility;
 
@@ -261,19 +263,27 @@ namespace Robust.Shared.Network
                 // Await response.
                 var response = await AwaitData(winningConnection, mainCancelToken);
                 var receivedUsername = response.ReadString();
+                var timing = IoCManager.Resolve<IGameTiming>();
+                var timeout = (int)(timing.TickPeriod.TotalMilliseconds * 1000);
+
+                var socket = new Socket(winningConnection.RemoteEndPoint.AddressFamily, SocketType.Stream, ProtocolType.IP)
+                {
+                    ExclusiveAddressUse = false,
+                    NoDelay = true,
+                    SendBufferSize = 256 * 1024, // _config.GetCVar<int>("net.tcp.sendbuffersize")
+                    ReceiveBufferSize = 256 * 1024, // _config.GetCVar<int>("net.tcp.receivebuffersize")
+                    SendTimeout = timeout, // _config.GetCVar<int>("net.tcp.sendtimeout")
+                    ReceiveTimeout = timeout, // _config.GetCVar<int>("net.tcp.receivetimeout")
+                    LingerState = new LingerOption(true,10) // _config.GetCVar<int>("net.tcp.lingertime")
+                };
+
+                //socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.TypeOfService, 0x10 /* low latency */);
+
                 var tcpClient = new TcpClient
                 {
-                    Client = new Socket(winningConnection.RemoteEndPoint.AddressFamily, SocketType.Stream, ProtocolType.IP)
-                    {
-                        ExclusiveAddressUse = false,
-                        NoDelay = true,
-                        SendBufferSize = 256 * 1024, // _config.GetCVar<int>("net.tcp.sendbuffersize")
-                        ReceiveBufferSize = 256 * 1024, // _config.GetCVar<int>("net.tcp.receivebuffersize")
-                        SendTimeout = 3 * 60 * 1000, // _config.GetCVar<int>("net.tcp.sendtimeout")
-                        ReceiveTimeout = 3* 60 * 1000, // _config.GetCVar<int>("net.tcp.receivetimeout")
-                        LingerState = new LingerOption(true,3 * 60) // _config.GetCVar<int>("net.tcp.lingertime")
-                    },
+                    Client = socket,
                 };
+
 
                 var nonce = Guid.NewGuid();
                 var confirmConnectionMsg = winningPeer.CreateMessage("ok "+nonce );

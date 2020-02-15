@@ -35,6 +35,18 @@ namespace Robust.Shared.Interfaces.Network
         /// </summary>
         short Ping { get; }
 
+        long BackChannelBytesSent { get; }
+
+        long BackChannelBytesReceived { get; }
+
+        long BackChannelBytesSentCompressed { get; }
+
+        long BackChannelBytesReceivedCompressed { get; }
+
+        bool BackChannelConnected { get; }
+
+        int BackChannelDataAvailable { get; }
+
         /// <summary>
         ///     Creates a new NetMessage to be filled up and sent.
         /// </summary>
@@ -54,5 +66,10 @@ namespace Robust.Shared.Interfaces.Network
         /// </summary>
         /// <param name="reason">Reason why it was disconnected.</param>
         void Disconnect(string reason);
+
+        void BackChannelWrite(byte[] buffer, int offset, int length);
+
+        byte[] BackChannelFill(byte[] buffer, ref int read);
+
     }
 }

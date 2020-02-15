@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -7,14 +8,18 @@ using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidgren.Network;
+using Robust.Shared.Asynchronous;
 using Robust.Shared.Configuration;
 using Robust.Shared.Interfaces.Configuration;
+using Robust.Shared.Interfaces.Log;
 using Robust.Shared.Interfaces.Network;
+using Robust.Shared.Interfaces.Timing;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
 using Robust.Shared.Timing;
@@ -59,7 +64,7 @@ namespace Robust.Shared.Network
         private readonly Dictionary<Type, Func<NetMessage>> _blankNetMsgFunctions = new Dictionary<Type, Func<NetMessage>>();
 
 #pragma warning disable 649
-        [Dependency] private readonly IConfigurationManager _config;
+        [IoC.Dependency] private readonly IConfigurationManager _config;
 #pragma warning restore 649
 
         /// <summary>
@@ -232,13 +237,16 @@ namespace Robust.Shared.Network
                 {
                     ExclusiveAddressUse = false
                 };
+                var timing = IoCManager.Resolve<IGameTiming>();
+                var timeout = (int) (timing.TickPeriod.TotalMilliseconds * 1000);
                 listener.Start();
                 listener.Server.NoDelay = true;
                 listener.Server.SendBufferSize = 256 * 1024; // _config.GetCVar<int>("net.tcp.sendbuffersize")
                 listener.Server.ReceiveBufferSize = 256 * 1024; // _config.GetCVar<int>("net.tcp.receivebuffersize")
-                listener.Server.SendTimeout = 3 * 60 * 1000; // _config.GetCVar<int>("net.tcp.sendtimeout")
-                listener.Server.ReceiveTimeout = 3 * 60 * 1000; // _config.GetCVar<int>("net.tcp.receivetimeout")
+                listener.Server.ReceiveTimeout = timeout;
+                listener.Server.SendTimeout = timeout;
                 listener.Server.LingerState = new LingerOption(true, 3 * 60); // _config.GetCVar<int>("net.tcp.lingertime")
+                //listener.Server.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.TypeOfService, 0x10 /* low latency */);
 
                 _tcpListeners.Add(listener);
 
@@ -268,7 +276,7 @@ namespace Robust.Shared.Network
             {
                 Logger.WarningS("net",
                     "IPv6 Dual Stack is enabled but no IPv6 addresses have been bound to. This will not work.");
-        }
+            }
         }
 
         public void Dispose()
@@ -386,7 +394,7 @@ namespace Robust.Shared.Network
                 }
             }
 
-            ProcessBackChannelPackets();
+            StartProcessBackChannelPackets();
 
             if (IsServer)
             {
@@ -394,33 +402,141 @@ namespace Robust.Shared.Network
             }
         }
 
+        private bool ExecuteInlineIfOnSyncCtx(Action a)
+        {
+            if (_syncCtx == SynchronizationContext.Current)
+            {
+                a();
+                return true;
+            }
+
+            return false;
+        }
+
+        public void WaitSync(Action a, CancellationToken ct = default)
+        {
+            if (ExecuteInlineIfOnSyncCtx(a))
+            {
+                return;
+            }
+
+            // throws not implemented
+            //_syncCtx.Send(x => ((Action) x)(), a);
+
+            using var e = new ManualResetEventSlim(false, 0);
+            _syncCtx.Post(_ =>
+            {
+                a();
+                // ReSharper disable once AccessToDisposedClosure
+                e.Set();
+            }, null);
+            e.Wait(ct);
+        }
+
+        private Thread _processBackChannelPacketsThread;
+
+        private SynchronizationContext _syncCtx;
+
+        private void StartProcessBackChannelPackets()
+        {
+            if (_processBackChannelPacketsThread != null)
+            {
+                return;
+            }
+
+            _syncCtx = SynchronizationContext.Current;
+            var logMgr = IoCManager.Resolve<ILogManager>();
+            var timing = IoCManager.Resolve<IGameTiming>();
+
+            _processBackChannelPacketsThread = new Thread(state =>
+            {
+
+                IoCManager.Clear();
+                IoCManager.InitThread();
+
+                if (logMgr != null)
+                {
+                    IoCManager.RegisterInstance(logMgr);
+                    IoCManager.RegisterInstance(timing);
+                }
+
+                IoCManager.BuildGraph();
+
+                do
+                {
+                    ProcessBackChannelPackets();
+                } while (_channels.Count > 0);
+
+                _processBackChannelPacketsThread = null;
+            });
+
+            _processBackChannelPacketsThread.Start(this);
+        }
+
         private void ProcessBackChannelPackets()
         {
-            foreach (var (connection,channel) in _channels)
+            foreach (var (connection, channel) in _channels)
             {
-                if (!channel.TcpClient.Connected)
+                channel.FlushOutbound();
+                if (!channel.BackChannelConnected)
+                {
+                    // TODO: maybe remove or reconnect
+                    continue;
+                }
+
+                if (channel.BackChannelDataAvailable < 4)
                 {
                     continue;
                 }
 
-                if (!channel.TcpClient.GetStream().DataAvailable)
+                try
                 {
-                    continue;
-                }
+                    var readLengthBuf = new byte[4];
+                    Logger.InfoS("net.tcp", "Reading packet from back channel...");
+                    var read = 0;
+                    readLengthBuf = channel.BackChannelFill(readLengthBuf, ref read);
+                    while (read < 4)
+                    {
+                        readLengthBuf = channel.BackChannelFill(readLengthBuf, ref read);
+                    }
 
-                var backChannel = channel.BackChannelInbound;
-                var packetSize = BitConverter.ToInt32(backChannel.ReadExact(4));
-                if (packetSize <= 0 || packetSize > 12*1024*1024)
+                    var packetSize = BitConverter.ToInt32(readLengthBuf);
+                    if (packetSize <= 0)
+                    {
+                        // TODO: could we send a packet bigger than 12MB?
+                        throw new NotImplementedException("Packet size invalid!");
+                    }
+
+                    if (packetSize > 12 * 1024 * 1024)
+                    {
+                        // TODO: could we send a packet bigger than 12MB?
+                        throw new NotImplementedException("Packet size out of expected range!");
+                    }
+
+                    var msg = (NetIncomingMessage) FormatterServices.GetUninitializedObject(typeof(NetIncomingMessage));
+                    msg.LengthBytes = packetSize;
+                    var buf = new byte[packetSize];
+                    read = 0;
+                    msg.Data = channel.BackChannelFill(buf, ref read);
+                    while (read < packetSize)
+                    {
+                        msg.Data = channel.BackChannelFill(buf, ref read);
+                    }
+
+                    // note: .MessageType will be Error, gaf?
+                    Logger.InfoS("net.tcp", "Dispatching a message generated from the back channel.");
+                    _syncCtx.Post(_ => {
+                        DispatchNetMessage(msg, connection);
+                    }, null);
+                }
+                catch (IOException ioex)
                 {
-                    // TODO: could we send a packet bigger than 12MB?
-                    throw new NotImplementedException();
+                    // TODO: handle tcp client disconnected better
+                    var s = $"Back Channel {ioex.GetType().FullName}: {ioex.Message}";
+                    Logger.WarningS("net.tcp",s);
+                    connection.Disconnect(s);
+                    return;
                 }
-
-                var msg = (NetIncomingMessage) FormatterServices.GetUninitializedObject(typeof(NetIncomingMessage));
-                msg.LengthBytes = packetSize;
-                msg.Data = backChannel.ReadExact(packetSize);
-                // note: .MessageType will be Error, gaf?
-                DispatchNetMessage(msg, connection);
             }
         }
 
@@ -440,13 +556,16 @@ namespace Robust.Shared.Network
                     }
                     else
                     {
+                        var timing = IoCManager.Resolve<IGameTiming>();
+                        var timeout = (int) (timing.TickPeriod.TotalMilliseconds * 1000);
                         Logger.InfoS("net.tcp", $"Connection from a client with the same IP: {ip}");
                         client.Client.NoDelay = true;
                         client.Client.SendBufferSize = 256 * 1024; // _config.GetCVar<int>("net.tcp.sendbuffersize")
                         client.Client.ReceiveBufferSize = 256 * 1024; // _config.GetCVar<int>("net.tcp.receivebuffersize")
-                        client.Client.SendTimeout = 3 * 60 * 1000; // _config.GetCVar<int>("net.tcp.sendtimeout")
-                        client.Client.ReceiveTimeout = 3 * 60 * 1000; // _config.GetCVar<int>("net.tcp.receivetimeout")
-                        client.Client.LingerState = new LingerOption(true, 3 * 60); // _config.GetCVar<int>("net.tcp.lingertime")
+                        client.Client.SendTimeout = timeout; // _config.GetCVar<int>("net.tcp.sendtimeout")
+                        client.Client.ReceiveTimeout = timeout; // _config.GetCVar<int>("net.tcp.receivetimeout")
+                        client.Client.LingerState = new LingerOption(true, 10); // _config.GetCVar<int>("net.tcp.lingertime")
+                        //client.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.TypeOfService, 0x10 /* low latency */);
                         try
                         {
                             var stream = client.GetStream();
@@ -771,7 +890,7 @@ namespace Robust.Shared.Network
 
                 _cancelConnectTokenSource?.Cancel();
                 _clientConnectionState = ClientConnectionState.NotConnecting;
-        }
+            }
         }
 
         /// <inheritdoc />
@@ -962,7 +1081,9 @@ namespace Robust.Shared.Network
         {
             DebugTools.Assert(IsServer);
             if (!(recipient is NetChannel channel))
+            {
                 throw new ArgumentException($"Not of type {typeof(NetChannel).FullName}", nameof(recipient));
+            }
 
             var connection = channel.Connection;
             var peer = connection.Peer;
@@ -970,16 +1091,32 @@ namespace Robust.Shared.Network
             var packet = BuildMessage(message, peer);
 
             var packetSize = packet.LengthBytes;
+            DebugTools.Assert(packetSize > 0);
             if (connection.WillBeQueued(packetSize))
             {
-                var backChannel = channel.BackChannelOutbound;
-                backChannel.Write(BitConverter.GetBytes(packetSize));
-                backChannel.Write(packet.Data, 0, packetSize);
-                backChannel.Flush();
+                try
+                {
+                    Logger.InfoS("net.tcp", "Send a message that would be queued across the back channel.");
+                    var packetSizeBytes = BitConverter.GetBytes(packetSize);
+                    channel.BackChannelWrite(packetSizeBytes, 0, 4);
+                    channel.BackChannelWrite(packet.Data, 0, packetSize);
+                    if (packetSize > connection.CurrentMTU)
+                        channel.FlushOutbound(true);
+                }
+                catch (IOException)
+                {
+                    // TODO: handle tcp client disconnected better
+                    Logger.WarningS("net.tcp", "Disconnecting connection that lost TCP back channel.");
+                    connection.Disconnect("I lost your back channel connection.");
+                }
             }
-            else {
+            else
+            {
                 peer.SendMessage(packet, connection, NetDeliveryMethod.ReliableOrdered);
             }
+
+            //Logger.InfoS("net.tcp", "Flushing outbound packets from server send messages...");
+            channel.FlushOutbound();
         }
 
         /// <inheritdoc />

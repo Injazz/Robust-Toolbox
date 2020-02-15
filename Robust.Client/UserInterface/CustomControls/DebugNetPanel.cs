@@ -84,9 +84,38 @@ namespace Robust.Client.UserInterface.CustomControls
             LastSentPackets = stats.SentPackets;
             LastReceivedPackets = stats.ReceivedPackets;
 
-            contents.Text = $@"UP: {sentBytes / ONE_KIBIBYTE:N} KiB/s, {sentPackets} pckt/s, {LastSentBytes / ONE_KIBIBYTE:N} KiB, {LastSentPackets} pckt
+            var tcpSentBytes = 0L;
+            var tcpRecvBytes = 0L;
+            var tcpSentBytesCmp = 0L;
+            var tcpRecvBytesCmp = 0L;
+
+            if (NetManager.IsClient)
+            {
+
+                var sch = NetManager.ServerChannel;
+                if (sch != null)
+                {
+                    tcpSentBytes += sch.BackChannelBytesSent;
+                    tcpRecvBytes += sch.BackChannelBytesReceived;
+                    tcpSentBytesCmp += sch.BackChannelBytesSentCompressed;
+                    tcpRecvBytesCmp += sch.BackChannelBytesReceivedCompressed;
+                }
+            }
+            else
+            {
+                foreach (var ch in NetManager.Channels)
+                {
+                    tcpSentBytes += ch.BackChannelBytesSent;
+                    tcpRecvBytes += ch.BackChannelBytesReceived;
+                    tcpSentBytesCmp += ch.BackChannelBytesSentCompressed;
+                    tcpRecvBytesCmp += ch.BackChannelBytesReceivedCompressed;
+                }
+            }
+
+            contents.Text = $@"Lidgren {{UP: {sentBytes / ONE_KIBIBYTE:N} KiB/s, {sentPackets} pckt/s, {LastSentBytes / ONE_KIBIBYTE:N} KiB, {LastSentPackets} pckt
 DOWN: {receivedBytes / ONE_KIBIBYTE:N} KiB/s, {receivedPackets} pckt/s, {LastReceivedBytes / ONE_KIBIBYTE:N} KiB, {LastReceivedPackets} pckt
-PING: {NetManager.ServerChannel?.Ping ?? -1} ms";
+PING: {NetManager.ServerChannel?.Ping ?? -1} ms}}"
+            + $" Back Channel {{ {tcpSentBytesCmp / ONE_KIBIBYTE:N} ({tcpSentBytes / ONE_KIBIBYTE:N}) KiB Sent, {tcpRecvBytesCmp / ONE_KIBIBYTE:N} ({tcpRecvBytes / ONE_KIBIBYTE:N}) KiB Recv }}";
 
             MinimumSizeChanged();
         }

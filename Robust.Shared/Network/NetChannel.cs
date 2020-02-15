@@ -1,11 +1,17 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using Joveler.Compression.XZ;
 using Lidgren.Network;
 using Robust.Shared.Interfaces.Network;
+using Robust.Shared.Interfaces.Timing;
+using Robust.Shared.IoC;
+using Robust.Shared.Log;
 
 namespace Robust.Shared.Network
 {
@@ -50,8 +56,9 @@ namespace Robust.Shared.Network
             XZInit.GlobalInit(libPath);
         }
 
-        public static void StaticInitializer() {}
-
+        public static void StaticInitializer()
+        {
+        }
 
         private readonly NetManager _manager;
 
@@ -59,9 +66,9 @@ namespace Robust.Shared.Network
 
         private readonly TcpClient _tcpClient;
 
+        private StatisticsGatheringStreamWrapper _backChannelInbound;
 
-        private XZStream _backChannelInbound;
-        private XZStream _backChannelOutbound;
+        private StatisticsGatheringStreamWrapper _backChannelOutbound;
 
         /// <inheritdoc />
         public long ConnectionId => _connection.RemoteUniqueIdentifier;
@@ -83,26 +90,115 @@ namespace Robust.Shared.Network
         /// <summary>
         ///     Exposes the TCP connection.
         /// </summary>
-        public TcpClient TcpClient => _tcpClient;
+        private TcpClient TcpClient => _tcpClient;
 
-        public Stream BackChannelInbound => _backChannelInbound
-            ??= new XZStream(_tcpClient.GetStream(), new XZDecompressOptions
-            {
-                BufferSize = 4 * 1024 * 1024,
-                DecodeFlags = LzmaDecodingFlag.IgnoreCheck
-            });
+        /// <remarks>
+        ///     You need to wrap this if you want to gather send/receive statistics.
+        /// </remarks>
+        private NetworkStream BackChannelNetworkStream => TcpClient.GetStream();
 
-        public Stream BackChannelOutbound => _backChannelOutbound
-            ??= new XZStream(_tcpClient.GetStream(), new XZCompressOptions
+        private StatisticsGatheringStreamWrapper _backChannelStats;
+
+        private StatisticsGatheringStreamWrapper StatsGatherer => _backChannelStats
+            ??= new StatisticsGatheringStreamWrapper(BackChannelNetworkStream);
+
+        private StatisticsGatheringStreamWrapper BackChannelInbound => _backChannelInbound
+            ??= new StatisticsGatheringStreamWrapper(
+                new XZStream(StatsGatherer, new XZDecompressOptions
+                {
+                    LeaveOpen = true,
+                    BufferSize = 4 * 1024 * 1024,
+                    DecodeFlags = LzmaDecodingFlag.Concatenated,
+                    MemLimit = 32 * 1024 * 1024,
+                })
+            );
+
+        private StatisticsGatheringStreamWrapper BackChannelOutbound => _backChannelOutbound
+            ??= new StatisticsGatheringStreamWrapper(
+                new XZStream(StatsGatherer, new XZCompressOptions
+                {
+                    LeaveOpen = true,
+                    BufferSize = 4 * 1024 * 1024,
+                    Check = LzmaCheck.Crc32,
+                    ExtremeFlag = false,
+                    Level = LzmaCompLevel.Level6
+                })
+            );
+
+        public long BackChannelBytesSent => _backChannelOutbound.BytesWritten;
+        public long BackChannelBytesReceived => _backChannelInbound.BytesRead;
+        public long BackChannelBytesSentCompressed => _backChannelStats.BytesWritten;
+        public long BackChannelBytesReceivedCompressed => _backChannelStats.BytesRead;
+
+        public void BackChannelWrite(byte[] buffer, int offset, int length) =>
+            BackChannelOutbound.Write(buffer, offset, length);
+
+        public byte[] BackChannelFill(byte[] buffer, ref int read)
+        {
+            if (read == buffer.Length)
+                throw new ArgumentOutOfRangeException(nameof(read));
+
+            var size = buffer.Length - read;
+            try
             {
-                BufferSize = 4 * 1024 * 1024,
-                Check = LzmaCheck.None,
-                ExtremeFlag = false,
-                LeaveOpen = true,
-                Level = LzmaCompLevel.Level6
-            });
+                read += BackChannelInbound.Read(buffer, read, size);
+            }
+            catch (IOException ioex)
+            {
+                if (TcpClient.Connected)
+                {
+                    Logger.WarningS("net.tcp",
+                        $"Can't complete read of {size} real bytes from {TcpClient.Available} compressed bytes buffered yet.");
+                }
+            }
+
+            return buffer;
+        }
 
         public NetSessionId SessionId { get; }
+
+        public bool BackChannelConnected => TcpClient.Connected;
+
+        public int BackChannelDataAvailable => TcpClient.Client.Available;
+
+        private int _lastFlushedTick = -1;
+
+        private TimeSpan _lastFlushedTime;
+
+        public void FlushOutbound(bool force = false)
+        {
+            var timing = IoCManager.Resolve<IGameTiming>();
+            var currentTick = timing.CurTick.Value + 1;
+            var realTime = timing.RealTime;
+            if (force)
+            {
+                _lastFlushedTick = (int) currentTick;
+                _lastFlushedTime = realTime;
+                BackChannelOutbound.Flush();
+                BackChannelOutbound.Flush();
+            }
+
+            if (currentTick > _lastFlushedTick)
+            {
+                _lastFlushedTick = (int) currentTick;
+                _lastFlushedTime = realTime;
+                BackChannelOutbound.Flush();
+                BackChannelOutbound.Flush();
+            }
+            else if (currentTick <= _lastFlushedTick)
+            {
+                var twoTicks = timing.TickPeriod * 60;
+                var deadline = _lastFlushedTime.Add(twoTicks);
+                if (realTime > deadline)
+                {
+                    Logger.WarningS("net.tcp", $"Flushing outbound stream for an overly long tick: {currentTick}");
+                    _lastFlushedTick = (int) currentTick;
+                    _lastFlushedTime = realTime;
+                    BackChannelOutbound.Flush();
+                    BackChannelOutbound.Flush();
+                }
+            }
+        }
 
         /// <summary>
         ///     Creates a new instance of a NetChannel.
@@ -136,5 +232,7 @@ namespace Robust.Shared.Network
             if (_connection.Status == NetConnectionStatus.Connected)
                 _connection.Disconnect(reason);
         }
+
     }
+
 }

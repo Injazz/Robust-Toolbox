@@ -1,4 +1,8 @@
 using System.IO;
+using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
+using Robust.Shared.Network;
 
 namespace Robust.Shared.Utility
 {
@@ -24,13 +28,34 @@ namespace Robust.Shared.Utility
         /// <exception cref="EndOfStreamException">
         /// Thrown if not exactly <paramref name="amount"/> bytes could be read.
         /// </exception>
-        public static byte[] ReadExact(this Stream stream, int amount)
+        public static byte[] ReadExact(this Stream stream, int amount, bool network = false)
+        {
+            var buffer = new byte[amount];
+            var read = 0;
+            do
+            {
+                var cRead = stream.Read(buffer, read, amount - read);
+                if (cRead == 0)
+                {
+                    throw new EndOfStreamException();
+                }
+
+                read += cRead;
+            } while (read < amount);
+
+            return buffer;
+        }
+
+        /// <exception cref="EndOfStreamException">
+        /// Thrown if not exactly <paramref name="amount"/> bytes could be read.
+        /// </exception>
+        public static async Task<byte[]> ReadExactAsync(this Stream stream, int amount, bool network = false, CancellationToken ct = default)
         {
             var buffer = new byte[amount];
             var read = 0;
             while (read < amount)
             {
-                var cRead = stream.Read(buffer, read, amount - read);
+                var cRead = await stream.ReadAsync(buffer, read, amount - read, ct);
                 if (cRead == 0)
                 {
                     throw new EndOfStreamException();
