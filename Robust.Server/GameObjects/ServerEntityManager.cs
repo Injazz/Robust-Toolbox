@@ -243,7 +243,7 @@ namespace Robust.Server.GameObjects
                 var entityState = GetEntityState(ComponentManager, uid, fromTick);
                 stateEntities.Add(entityState);
 
-                if ((entity.Transform.WorldPosition - point).Length > range)
+                if (entityState.ComponentStates != null && (entity.Transform.WorldPosition - point).Length > range)
                 {
                     var idx = entityState.ComponentStates.FindIndex(x => x is TransformComponent.TransformComponentState);
                     if (idx != -1)
@@ -251,6 +251,7 @@ namespace Robust.Server.GameObjects
                         var oldState = (TransformComponent.TransformComponentState) entityState.ComponentStates[idx];
                         var newState = new TransformComponent.TransformComponentState(Vector2NaN, oldState.Rotation, oldState.ParentID);
                         entityState.ComponentStates[idx] = newState;
+                        seenMovers.Remove(uid);
                     }
                 }
 
