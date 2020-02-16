@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using Robust.Server.GameObjects.Components.Container;
 using Robust.Server.Interfaces.GameObjects;
 using Robust.Server.Interfaces.Player;
 using Robust.Server.Interfaces.Timing;
@@ -178,7 +179,7 @@ namespace Robust.Server.GameObjects
             lastSeen[uid] = tick;
         }
 
-        private IEnumerable<IEntity> IncludeParents(IEnumerable<IEntity> children)
+        private IEnumerable<IEntity> IncludeRelatives(IEnumerable<IEntity> children)
         {
             var set = new HashSet<IEntity>();
             foreach (var child in children)
@@ -188,9 +189,22 @@ namespace Robust.Server.GameObjects
                 do
                 {
                     set.Add(ent);
+
+                    if (ent.TryGetComponent(out ContainerManagerComponent contMgr))
+                    {
+                        foreach (var container in contMgr.GetAllContainers())
+                        {
+                            foreach (var contEnt in container.ContainedEntities)
+                            {
+                                set.Add(contEnt);
+                            }
+                        }
+                    }
+
                     ent = ent.Transform.Parent?.Owner;
                 } while (ent != null && !ent.Deleted);
             }
+
 
             return set;
         }
@@ -243,7 +257,7 @@ namespace Robust.Server.GameObjects
                 includedEnts.Add(uid);
             }
 
-            foreach (var entity in IncludeParents(GetEntitiesInRange(mapId, point, range)))
+            foreach (var entity in IncludeRelatives(GetEntitiesInRange(mapId, point, range)))
             {
                 DebugTools.Assert(entity.Initialized && !entity.Deleted);
 
