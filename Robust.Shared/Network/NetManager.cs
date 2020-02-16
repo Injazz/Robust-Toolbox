@@ -949,6 +949,12 @@ namespace Robust.Shared.Network
             {
                 instance.ReadFromBuffer(msg);
             }
+            catch (InvalidCastException ice)
+            {
+                Logger.ErrorS("net",
+                    $"{msg.SenderConnection.RemoteEndPoint}: Wrong deserialization of {type.Name} packet: {ice.Message}");
+                throw ice;
+            }
             catch (Exception e) // yes, we want to catch ALL exeptions for security
             {
                 Logger.WarningS("net",
@@ -1066,7 +1072,7 @@ namespace Robust.Shared.Network
             foreach (var peer in _netPeers)
             {
                 var packet = BuildMessage(message, peer);
-                var method = GetMethod(message.MsgGroup);
+                var method = message.DeliveryMethod;
                 if (peer.ConnectionsCount == 0)
                 {
                     continue;
@@ -1112,7 +1118,8 @@ namespace Robust.Shared.Network
             }
             else
             {
-                peer.SendMessage(packet, connection, NetDeliveryMethod.ReliableOrdered);
+                var method = message.DeliveryMethod;
+                peer.SendMessage(packet, connection, method);
             }
 
             //Logger.InfoS("net.tcp", "Flushing outbound packets from server send messages...");
@@ -1146,7 +1153,7 @@ namespace Robust.Shared.Network
 
             var peer = _netPeers[0];
             var packet = BuildMessage(message, peer);
-            var method = GetMethod(message.MsgGroup);
+            var method = message.DeliveryMethod;
             peer.SendMessage(packet, peer.Connections[0], method);
         }
 
@@ -1190,22 +1197,6 @@ namespace Robust.Shared.Network
         public event EventHandler<NetChannelArgs> Disconnect;
 
         #endregion Events
-
-        private static NetDeliveryMethod GetMethod(MsgGroups group)
-        {
-            switch (group)
-            {
-                case MsgGroups.Entity:
-                    return NetDeliveryMethod.Unreliable;
-                case MsgGroups.Core:
-                case MsgGroups.String:
-                case MsgGroups.Command:
-                case MsgGroups.EntityEvent:
-                    return NetDeliveryMethod.ReliableUnordered;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(group), group, null);
-            }
-        }
 
         private enum ClientConnectionState
         {

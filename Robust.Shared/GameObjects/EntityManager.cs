@@ -50,7 +50,9 @@ namespace Robust.Shared.GameObjects
         /// <summary>
         ///     All entities currently stored in the manager.
         /// </summary>
-        protected readonly ConcurrentDictionary<EntityUid, IEntity> Entities = new ConcurrentDictionary<EntityUid, IEntity>();
+        protected readonly Dictionary<EntityUid, IEntity> Entities = new Dictionary<EntityUid, IEntity>();
+
+        protected readonly List<IEntity> AllEntities = new List<IEntity>();
 
         protected readonly Queue<IncomingEntityMessage> NetworkMessageBuffer = new Queue<IncomingEntityMessage>();
 
@@ -151,7 +153,8 @@ namespace Robust.Shared.GameObjects
             foreach (var entity in _entityTreesPerMap[mapId].Query(position))
             {
                 var transform = entity.Transform;
-                if (FloatMath.CloseTo(transform.GridPosition.X, position.X) && FloatMath.CloseTo(transform.GridPosition.Y, position.Y))
+                if (FloatMath.CloseTo(transform.GridPosition.X, position.X) &&
+                    FloatMath.CloseTo(transform.GridPosition.Y, position.Y))
                 {
                     yield return entity;
                 }
@@ -160,9 +163,11 @@ namespace Robust.Shared.GameObjects
 
         public IEnumerable<IEntity> GetEntities()
         {
-            // now safe to iterate while adding/removing
-            foreach (var entity in Entities.Values)
+            // Need to do an iterator loop to avoid issues with concurrent access.
+            // ReSharper disable once ForCanBeConvertedToForeach
+            for (var i = 0; i < AllEntities.Count; i++)
             {
+                var entity = AllEntities[i];
                 if (entity.Deleted)
                 {
                     continue;
@@ -251,6 +256,7 @@ namespace Robust.Shared.GameObjects
             _componentManager.AddComponent<TransformComponent>(entity);
 
             Entities[entity.Uid] = entity;
+            AllEntities.Add(entity);
             UpdateEntityTree(entity);
 
             return entity;
@@ -295,15 +301,20 @@ namespace Robust.Shared.GameObjects
             // Culling happens in updates.
             // It doesn't matter because to-be culled entities can't be accessed.
             // This should prevent most cases of "somebody is iterating while we're removing things"
-            foreach (var entity in Entities.Values)
+            for (var i = 0; i < AllEntities.Count; i++)
             {
+                var entity = AllEntities[i];
                 if (!entity.Deleted)
                 {
                     continue;
                 }
 
-                Entities.Remove(entity.Uid, out _);
+                AllEntities.RemoveSwap(i);
+                Entities.Remove(entity.Uid);
                 RemoveFromEntityTrees(entity);
+
+                // Process the one we just swapped next.
+                i--;
             }
         }
 
@@ -318,7 +329,8 @@ namespace Robust.Shared.GameObjects
 
             if (!Started)
             {
-                if (incomingEntity.Message.Type != EntityMessageType.Error) NetworkMessageBuffer.Enqueue(incomingEntity);
+                if (incomingEntity.Message.Type != EntityMessageType.Error)
+                    NetworkMessageBuffer.Enqueue(incomingEntity);
                 return;
             }
 
@@ -342,7 +354,8 @@ namespace Robust.Shared.GameObjects
                 if (!Entities.TryGetValue(incomingEntity.Message.EntityUid, out var entity))
                 {
                     incomingEntity.LastProcessingAttempt = DateTime.Now;
-                    if ((incomingEntity.LastProcessingAttempt - incomingEntity.ReceivedTime).TotalSeconds > incomingEntity.Expires)
+                    if ((incomingEntity.LastProcessingAttempt - incomingEntity.ReceivedTime).TotalSeconds >
+                        incomingEntity.Expires)
                         misses.Add(incomingEntity);
                 }
                 else
@@ -399,8 +412,8 @@ namespace Robust.Shared.GameObjects
             _entityTreesPerMap[mapId].Query(box).Any(ent => !ent.Deleted);
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 position) {
-
+        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 position)
+        {
             var newResults = _entityTreesPerMap[mapId].Query(position); // .ToArray();
 
             foreach (var entity in newResults)
@@ -415,7 +428,8 @@ namespace Robust.Shared.GameObjects
         }
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position) {
+        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position)
+        {
             const float range = .00001f / 2;
             var aabb = new Box2(position, position).Enlarged(range);
 
@@ -429,7 +443,6 @@ namespace Robust.Shared.GameObjects
 
             foreach (var entity in newResults)
             {
-
                 if (entity.TryGetComponent(out ICollidableComponent component))
                 {
                     if (component.WorldAABB.Contains(position))
@@ -475,7 +488,8 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public IEnumerable<IEntity> GetEntitiesInRange(GridCoordinates position, float range)
         {
-            var aabb = new Box2(position.Position - new Vector2(range / 2, range / 2), position.Position + new Vector2(range / 2, range / 2));
+            var aabb = new Box2(position.Position - new Vector2(range / 2, range / 2),
+                position.Position + new Vector2(range / 2, range / 2));
             return GetEntitiesIntersecting(_mapManager.GetGrid(position.GridID).ParentMapId, aabb);
         }
 
@@ -508,14 +522,16 @@ namespace Robust.Shared.GameObjects
         }
 
         /// <inheritdoc />
-        public IEnumerable<IEntity> GetEntitiesInArc(GridCoordinates coordinates, float range, Angle direction, float arcWidth)
+        public IEnumerable<IEntity> GetEntitiesInArc(GridCoordinates coordinates, float range, Angle direction,
+            float arcWidth)
         {
             var position = coordinates.ToMap(_mapManager).Position;
 
-            foreach (var entity in GetEntitiesInRange(coordinates, range*2))
+            foreach (var entity in GetEntitiesInRange(coordinates, range * 2))
             {
                 var angle = new Angle(entity.Transform.WorldPosition - position);
-                if (angle.Degrees < direction.Degrees + arcWidth / 2 && angle.Degrees > direction.Degrees - arcWidth / 2)
+                if (angle.Degrees < direction.Degrees + arcWidth / 2 &&
+                    angle.Degrees > direction.Degrees - arcWidth / 2)
                     yield return entity;
             }
         }
@@ -525,11 +541,11 @@ namespace Robust.Shared.GameObjects
 
         #region Entity DynamicTree
 
+        private ConcurrentDictionary<MapId, DynamicTree<IEntity>> _entityTreesPerMap =
+            new ConcurrentDictionary<MapId, DynamicTree<IEntity>>();
 
-        private ConcurrentDictionary<MapId, DynamicTree<IEntity>> _entityTreesPerMap = new ConcurrentDictionary<MapId, DynamicTree<IEntity>>();
-
-        public bool UpdateEntityTree(IEntity entity) {
-
+        public bool UpdateEntityTree(IEntity entity)
+        {
             if (entity.Deleted)
             {
                 RemoveFromEntityTrees(entity);
@@ -572,9 +588,12 @@ namespace Robust.Shared.GameObjects
             return necessary > 0;
         }
 
-        private void RemoveFromEntityTrees(IEntity entity) {
-            foreach (var mapId in _mapManager.GetAllMapIds()) {
-                if (_entityTreesPerMap.TryGetValue(mapId, out var entTree)) {
+        private void RemoveFromEntityTrees(IEntity entity)
+        {
+            foreach (var mapId in _mapManager.GetAllMapIds())
+            {
+                if (_entityTreesPerMap.TryGetValue(mapId, out var entTree))
+                {
                     entTree.Remove(entity);
                 }
             }
@@ -590,7 +609,7 @@ namespace Robust.Shared.GameObjects
         private static Box2 GetWorldAabbFromEntity(in IEntity ent)
         {
             if (ent.Deleted)
-                return new Box2(0,0,0,0);
+                return new Box2(0, 0, 0, 0);
 
             if (ent.TryGetComponent(out ICollidableComponent collider))
                 return collider.WorldAABB;
@@ -598,7 +617,6 @@ namespace Robust.Shared.GameObjects
             var pos = ent.Transform.WorldPosition;
             return new Box2(pos, pos);
         }
-
 
         #endregion
     }

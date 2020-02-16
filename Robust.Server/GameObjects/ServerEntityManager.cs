@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using Robust.Server.GameObjects.Components.Container;
 using Robust.Server.Interfaces.GameObjects;
 using Robust.Server.Interfaces.Player;
 using Robust.Server.Interfaces.Timing;
@@ -62,6 +63,17 @@ namespace Robust.Server.GameObjects
         public override IEntity CreateEntityUninitialized(string prototypeName, MapCoordinates coordinates)
         {
             var newEntity = CreateEntity(prototypeName);
+            if (prototypeName != null)
+            {
+                // At this point in time, all data configure on the entity *should* be purely from the prototype.
+                // As such, we can reset the modified ticks to Zero,
+                // which indicates "not different from client's own deserialization".
+                // So the initial data for the component or even the creation doesn't have to be sent over the wire.
+                foreach (var component in ComponentManager.GetNetComponents(newEntity.Uid))
+                {
+                    ((Component)component).ClearTicks();
+                }
+            }
             newEntity.Transform.AttachParent(_mapManager.GetMapEntity(coordinates.MapId));
             newEntity.Transform.WorldPosition = coordinates.Position;
             return newEntity;
@@ -103,9 +115,14 @@ namespace Robust.Server.GameObjects
         public List<EntityState> GetEntityStates(GameTick fromTick)
         {
             var stateEntities = new List<EntityState>();
-            foreach (IEntity entity in GetEntities())
+            foreach (var entity in AllEntities)
             {
-                DebugTools.Assert(entity.Initialized && !entity.Deleted);
+                if (entity.Deleted)
+                {
+                    continue;
+                }
+
+                DebugTools.Assert(entity.Initialized);
 
                 if (entity.LastModifiedTick <= fromTick)
                     continue;
@@ -162,7 +179,7 @@ namespace Robust.Server.GameObjects
             lastSeen[uid] = tick;
         }
 
-        private IEnumerable<IEntity> IncludeParents(IEnumerable<IEntity> children)
+        private IEnumerable<IEntity> IncludeRelatives(IEnumerable<IEntity> children)
         {
             var set = new HashSet<IEntity>();
             foreach (var child in children)
@@ -172,9 +189,22 @@ namespace Robust.Server.GameObjects
                 do
                 {
                     set.Add(ent);
+
+                    if (ent.TryGetComponent(out ContainerManagerComponent contMgr))
+                    {
+                        foreach (var container in contMgr.GetAllContainers())
+                        {
+                            foreach (var contEnt in container.ContainedEntities)
+                            {
+                                set.Add(contEnt);
+                            }
+                        }
+                    }
+
                     ent = ent.Transform.Parent?.Owner;
                 } while (ent != null && !ent.Deleted);
             }
+
 
             return set;
         }
@@ -227,7 +257,7 @@ namespace Robust.Server.GameObjects
                 includedEnts.Add(uid);
             }
 
-            foreach (var entity in IncludeParents(GetEntitiesInRange(mapId, point, range)))
+            foreach (var entity in IncludeRelatives(GetEntitiesInRange(mapId, point, range)))
             {
                 DebugTools.Assert(entity.Initialized && !entity.Deleted);
 
@@ -350,13 +380,17 @@ namespace Robust.Server.GameObjects
             {
                 DebugTools.Assert(comp.Initialized);
 
-                //Ticks start at 1
-                DebugTools.Assert(comp.CreationTick != GameTick.Zero && comp.LastModifiedTick != GameTick.Zero);
+                // NOTE: When LastModifiedTick or CreationTick are 0 it means that the relevant data is
+                // "not different from entity creation".
+                // i.e. when the client spawns the entity and loads the entity prototype,
+                // the data it deserializes from the prototype SHOULD be equal
+                // to what the component state / ComponentChanged would send.
+                // As such, we can avoid sending this data in this case since the client "already has it".
 
-                if (comp.NetSyncEnabled && comp.LastModifiedTick >= fromTick)
+                if (comp.NetSyncEnabled && comp.LastModifiedTick != GameTick.Zero && comp.LastModifiedTick >= fromTick)
                     compStates.Add(comp.GetComponentState());
 
-                if (comp.CreationTick >= fromTick && !comp.Deleted)
+                if (comp.CreationTick != GameTick.Zero && comp.CreationTick >= fromTick && !comp.Deleted)
                 {
                     // Can't be null since it's returned by GetNetComponents
                     // ReSharper disable once PossibleInvalidOperationException
