@@ -13,6 +13,7 @@ using System.Runtime.Serialization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Joveler.Compression.XZ;
 using Lidgren.Network;
 using Robust.Shared.Asynchronous;
 using Robust.Shared.Configuration;
@@ -465,6 +466,11 @@ namespace Robust.Shared.Network
                 do
                 {
                     ProcessBackChannelPackets();
+
+                    if (!IsRunning)
+                    {
+                        break;
+                    }
                 } while (_channels.Count > 0);
 
                 _processBackChannelPacketsThread = null;
@@ -525,14 +531,17 @@ namespace Robust.Shared.Network
 
                     // note: .MessageType will be Error, gaf?
                     Logger.InfoS("net.tcp", "Dispatching a message generated from the back channel.");
-                    _syncCtx.Post(_ => {
+                    _syncCtx.Post(_ =>
+                    {
                         DispatchNetMessage(msg, connection);
                     }, null);
                 }
-                catch (IOException ioex)
+                catch (Exception ex)
                 {
-                    // TODO: handle tcp client disconnected better
-                    var s = $"Back Channel {ioex.GetType().FullName}: {ioex.Message}";
+                    // could be XZException or IOException or InvalidOperation exception
+                    // probably disconnect in any case
+                    // TODO: handle tcp client disconnected better, maybe try to reconnect
+                    var s = $"Back Channel {ex.GetType().FullName}: {ex.Message}";
                     Logger.WarningS("net.tcp",s);
                     connection.Disconnect(s);
                     return;

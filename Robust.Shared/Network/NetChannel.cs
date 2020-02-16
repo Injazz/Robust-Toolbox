@@ -227,6 +227,9 @@ namespace Robust.Shared.Network
         {
             if (_connection.Status == NetConnectionStatus.Connected)
                 _connection.Disconnect(reason);
+
+            if (_tcpClient.Connected )
+                _tcpClient.Dispose();
         }
 
     }
