@@ -121,6 +121,10 @@ namespace Robust.Shared.Network
                     Check = LzmaCheck.None,
                     ExtremeFlag = false,
                     Level = LzmaCompLevel.Level1
+                }, new XZThreadedCompressOptions
+                {
+                    BlockSize = 8 * 1024 * 1024,
+                    Threads = 2
                 })
             );
 
