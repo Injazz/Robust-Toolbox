@@ -395,14 +395,18 @@ namespace Robust.Shared.Network
                 }
             }
 
+            /*
             StartProcessBackChannelPackets();
+
 
             if (IsServer)
             {
                 ProcessBackChannelConnections();
             }
+            */
         }
 
+        /*
         private bool ExecuteInlineIfOnSyncCtx(Action a)
         {
             if (_syncCtx == SynchronizationContext.Current)
@@ -471,16 +475,19 @@ namespace Robust.Shared.Network
                     {
                         break;
                     }
+
                 } while (_channels.Count > 0);
 
                 _processBackChannelPacketsThread = null;
-            });
+            }) {IsBackground = true};
 
             _processBackChannelPacketsThread.Start(this);
         }
 
         private void ProcessBackChannelPackets()
         {
+            var sw = Stopwatch.StartNew();
+            var timing = IoCManager.Resolve<IGameTiming>();
             foreach (var (connection, channel) in _channels)
             {
                 channel.FlushOutbound();
@@ -529,6 +536,14 @@ namespace Robust.Shared.Network
                         msg.Data = channel.BackChannelFill(buf, ref read);
                     }
 
+                    if (msg.Data.Length != packetSize)
+                    {
+                        throw new NotImplementedException("Incomplete read of packet, wanted {packetSize} but read {msg.Data.Length}.");
+                    }
+                    if (packetSize == 0)
+                    {
+                        throw new NotImplementedException("Read packet of 0 size.");
+                    }
                     // note: .MessageType will be Error, gaf?
                     Logger.InfoS("net.tcp", "Dispatching a message generated from the back channel.");
                     _syncCtx.Post(_ =>
@@ -546,6 +561,16 @@ namespace Robust.Shared.Network
                     connection.Disconnect(s);
                     return;
                 }
+            }
+
+            var freeTime = timing.TickPeriod - sw.Elapsed;
+            if (freeTime < TimeSpan.Zero)
+            {
+                Logger.WarningS("net.tcp", $"Back channel processing is falling behind the tick rate!");
+            }
+            else
+            {
+                Thread.Sleep(freeTime);
             }
         }
 
@@ -574,7 +599,7 @@ namespace Robust.Shared.Network
                         client.Client.SendTimeout = timeout; // _config.GetCVar<int>("net.tcp.sendtimeout")
                         client.Client.ReceiveTimeout = timeout; // _config.GetCVar<int>("net.tcp.receivetimeout")
                         client.Client.LingerState = new LingerOption(true, 10); // _config.GetCVar<int>("net.tcp.lingertime")
-                        //client.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.TypeOfService, 0x10 /* low latency */);
+                        //client.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.TypeOfService, 0x10);
                         try
                         {
                             var stream = client.GetStream();
@@ -615,6 +640,7 @@ namespace Robust.Shared.Network
                 }
             }
         }
+        */
 
         /// <inheritdoc />
         public void ClientDisconnect(string reason)
@@ -647,7 +673,7 @@ namespace Robust.Shared.Network
 
             netConfig.ConnectionTimeout = 30000f;
 #endif
-            netConfig.MaximumTransmissionUnit = 1200;
+            netConfig.MaximumTransmissionUnit = 1000; // severely trunked connection
             netConfig.AutoExpandMTU = true;
 
             return netConfig;
@@ -825,6 +851,7 @@ namespace Robust.Shared.Network
             }
 
             var okMsgStr = okMsg.ReadString();
+            /*
             if (okMsgStr.StartsWith("ok ") && okMsgStr.Length > 3)
             {
                 // Handshake complete!
@@ -832,14 +859,23 @@ namespace Robust.Shared.Network
                 await HandleInitialHandshakeComplete(connection, nonce);
                 return;
             }
+            */
+            if (okMsgStr.Equals("ok"))
+            {
+                // Handshake complete!
+                await HandleInitialHandshakeComplete(connection);
+                return;
+            }
+
 
             connection.Disconnect("You should say ok and then a TCP port number.");
         }
 
-        private async Task HandleInitialHandshakeComplete(NetConnection sender, string nonce)
+        private ValueTask HandleInitialHandshakeComplete(NetConnection sender) //, string nonce)
         {
             var session = _assignedSessions[sender];
 
+            /*
             var sw = new Stopwatch();
             var ip = sender.RemoteEndPoint.Address;
             TcpClient tcpClient = null;
@@ -873,8 +909,9 @@ namespace Robust.Shared.Network
             {
                 Logger.ErrorS("net.tcp", $"Unable to locate a connection {ip}.");
             }
+            */
 
-            var channel = new NetChannel(this, sender, session, tcpClient);
+            var channel = new NetChannel(this, sender, session);//, tcpClient);
             _channels.Add(sender, channel);
 
             _strings.SendFullTable(channel);
@@ -882,6 +919,8 @@ namespace Robust.Shared.Network
             Logger.InfoS("net", $"{channel.RemoteEndPoint}: Connected");
 
             OnConnected(channel);
+
+            return default;
         }
 
         private void HandleDisconnect(NetConnection connection, string reason)
@@ -913,8 +952,12 @@ namespace Robust.Shared.Network
 
         private bool DispatchNetMessage(NetIncomingMessage msg, NetConnection senderConnection = null)
         {
-            if (senderConnection == null)
+            var fromBackChannel = senderConnection != null;
+            if (!fromBackChannel)
+            {
                 senderConnection = msg.SenderConnection;
+            }
+
             var peer = senderConnection.Peer;
             if (peer.Status == NetPeerStatus.ShutdownRequested)
                 return true;
@@ -959,7 +1002,7 @@ namespace Robust.Shared.Network
 
             try
             {
-                instance.ReadFromBuffer(msg);
+                instance.ReadFromBuffer(msg, true);
             }
             catch (InvalidCastException ice)
             {
@@ -971,6 +1014,7 @@ namespace Robust.Shared.Network
             {
                 Logger.WarningS("net",
                     $"{senderConnection.RemoteEndPoint}: Failed to deserialize {type.Name} packet: {e.Message}");
+                throw e;
             }
 
             if (!_callbacks.TryGetValue(type, out ProcessMessage callback))
@@ -1060,7 +1104,7 @@ namespace Robust.Shared.Network
             _blankNetMsgFunctions.Add(type, @delegate);
         }
 
-        private NetOutgoingMessage BuildMessage(NetMessage message, NetPeer peer, bool willBeCompressed = false)
+        private NetOutgoingMessage BuildMessage(NetMessage message, NetPeer peer, bool useCompression = false)
         {
             var packet = peer.CreateMessage(4);
 
@@ -1069,7 +1113,7 @@ namespace Robust.Shared.Network
                     $"[NET] No string in table with name {message.MsgName}. Was it registered?");
 
             packet.Write((byte) msgId);
-            message.WriteToBuffer(packet, willBeCompressed);
+            message.WriteToBuffer(packet, useCompression);
             return packet;
         }
 
@@ -1101,15 +1145,19 @@ namespace Robust.Shared.Network
             var connection = channel.Connection;
             var peer = connection.Peer;
 
-            var packet = BuildMessage(message, peer);
+            var packet = BuildMessage(message, peer, true);
 
             var packetSize = packet.LengthBytes;
             DebugTools.Assert(packetSize > 0);
-            if (packetSize > 1024 || connection.WillBeQueued(packetSize))
+            /*
+            if (packetSize > 8192)
             {
                 try
                 {
-                    Logger.InfoS("net.tcp", "Send a message that would be queued across the back channel.");
+                    // rebuild packet w/o compression
+                    packet = BuildMessage(message, peer);
+                    packetSize = packet.LengthBytes;
+                    Logger.InfoS("net.tcp", "Sending a large message across the back channel.");
                     var packetSizeBytes = BitConverter.GetBytes(packetSize);
                     channel.BackChannelWrite(packetSizeBytes, 0, 4);
                     channel.BackChannelWrite(packet.Data, 0, packetSize);
@@ -1124,13 +1172,14 @@ namespace Robust.Shared.Network
                 }
             }
             else
+            */
             {
                 var method = message.DeliveryMethod;
                 peer.SendMessage(packet, connection, method);
             }
 
             //Logger.InfoS("net.tcp", "Flushing outbound packets from server send messages...");
-            channel.FlushOutbound();
+            //channel.FlushOutbound();
         }
 
         /// <inheritdoc />
@@ -1159,7 +1208,7 @@ namespace Robust.Shared.Network
             DebugTools.Assert(_netPeers[0].ConnectionsCount == 1);
 
             var peer = _netPeers[0];
-            var packet = BuildMessage(message, peer);
+            var packet = BuildMessage(message, peer, true);
             var method = message.DeliveryMethod;
             peer.SendMessage(packet, peer.Connections[0], method);
         }

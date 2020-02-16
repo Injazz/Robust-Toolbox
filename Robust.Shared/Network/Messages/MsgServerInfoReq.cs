@@ -16,7 +16,7 @@ namespace Robust.Shared.Network.Messages
             // Nothing
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             // Nothing
         }

@@ -291,7 +291,7 @@ namespace Robust.Shared.Network
         }
 
         /// <inheritdoc />
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             if (Entries == null)
                 throw new InvalidOperationException("Entries is null!");

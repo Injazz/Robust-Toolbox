@@ -269,7 +269,7 @@ namespace Robust.Shared.Network
         public override int GetHashCode() => WrappedStream.GetHashCode();
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public override string ToString() => WrappedStream.ToString();
+        public override string ToString() => WrappedStream.ToString() ?? "";
 
     }
 

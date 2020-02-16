@@ -26,7 +26,7 @@ namespace Robust.Shared.Network.Messages
             SessionId = buffer.ReadUInt32();
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             buffer.Write(SessionId);
         }

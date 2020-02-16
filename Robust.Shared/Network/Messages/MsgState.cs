@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using Lidgren.Network;
 using Robust.Shared.GameStates;
 using Robust.Shared.Interfaces.Network;
@@ -46,10 +47,10 @@ namespace Robust.Shared.Network.Messages
             State.PayloadSize = length;
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             var serializer = IoCManager.Resolve<IRobustSerializer>();
-            serializer.UseCompression = !willBeCompressed;
+            serializer.UseCompression = useCompression;
             using (var stateStream = new MemoryStream())
             {
                 DebugTools.Assert(stateStream.Length <= Int32.MaxValue);

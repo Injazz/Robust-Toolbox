@@ -36,7 +36,7 @@ namespace Robust.Shared.Network.Messages
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             if(Commands == null) // client leaves comands as null to request from server
                 Commands = new Command[0];

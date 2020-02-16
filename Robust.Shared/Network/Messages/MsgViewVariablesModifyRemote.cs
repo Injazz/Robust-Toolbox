@@ -57,10 +57,10 @@ namespace Robust.Shared.Network.Messages
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             var serializer = IoCManager.Resolve<IRobustSerializer>();
-            serializer.UseCompression = !willBeCompressed;
+            serializer.UseCompression = useCompression;
             buffer.Write(SessionId);
             using (var stream = new MemoryStream())
             {

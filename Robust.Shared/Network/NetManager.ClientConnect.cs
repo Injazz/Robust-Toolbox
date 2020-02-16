@@ -263,6 +263,7 @@ namespace Robust.Shared.Network
                 // Await response.
                 var response = await AwaitData(winningConnection, mainCancelToken);
                 var receivedUsername = response.ReadString();
+                /*
                 var timing = IoCManager.Resolve<IGameTiming>();
                 var timeout = (int)(timing.TickPeriod.TotalMilliseconds * 1000);
 
@@ -277,7 +278,7 @@ namespace Robust.Shared.Network
                     LingerState = new LingerOption(true,10) // _config.GetCVar<int>("net.tcp.lingertime")
                 };
 
-                //socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.TypeOfService, 0x10 /* low latency */);
+                //socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.TypeOfService, 0x10);
 
                 var tcpClient = new TcpClient
                 {
@@ -304,8 +305,12 @@ namespace Robust.Shared.Network
                         tcpClient.Close();
                     }
                 }
+                */
 
-                var channel = new NetChannel(this, winningConnection, new NetSessionId(receivedUsername), tcpClient);
+                var confirmConnectionMsg = winningPeer.CreateMessage("ok" );
+                winningPeer.SendMessage(confirmConnectionMsg, winningConnection, NetDeliveryMethod.ReliableOrdered);
+
+                var channel = new NetChannel(this, winningConnection, new NetSessionId(receivedUsername)); //, tcpClient);
                 _channels.Add(winningConnection, channel);
             }
             catch (TaskCanceledException)

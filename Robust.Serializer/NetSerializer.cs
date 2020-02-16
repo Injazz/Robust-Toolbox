@@ -7,11 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-using Robust.Shared.Interfaces.Serialization;
-using Robust.Shared.IoC;
-using Robust.Shared.Serialization;
-
-[module: IoCRegister(typeof(IRobustSerializer), typeof(Robust.Shared.Serialization.NetSerializer))]
+//[module: IoCRegister(typeof(IRobustSerializer), typeof(Robust.Shared.Serialization.NetSerializer))]
 
 
 namespace Robust.Shared.Serialization

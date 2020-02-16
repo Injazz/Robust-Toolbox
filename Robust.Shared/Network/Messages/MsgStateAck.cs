@@ -19,7 +19,7 @@ namespace Robust.Shared.Network.Messages
             Sequence = new GameTick(buffer.ReadUInt32());
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             buffer.Write(Sequence.Value);
         }

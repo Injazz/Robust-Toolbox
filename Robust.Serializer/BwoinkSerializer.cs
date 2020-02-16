@@ -16,7 +16,7 @@ using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
 using Robust.Shared.Serialization;
 
-//[module: IoCRegister(typeof(IRobustSerializer), typeof(RobustSerializer))]
+[module: IoCRegister(typeof(IRobustSerializer), typeof(BwoinkSerializer))]
 
 namespace Robust.Shared.Serialization
 {
@@ -34,7 +34,7 @@ namespace Robust.Shared.Serialization
 
         internal bool Tracing
         {
-            get => Debugger.IsAttached || _tracing;
+            get => _tracing; //Debugger.IsAttached || _tracing;
             set => _tracing = value;
         }
 #endif
@@ -1027,11 +1027,6 @@ namespace Robust.Shared.Serialization
             {
                 TraceUnindent();
             }
-
-            if (type == null)
-            {
-                return null;
-            }
         }
 
         private object ReadEnumerable(Stream stream, Type type, List<object> backRefs)
@@ -1264,15 +1259,10 @@ namespace Robust.Shared.Serialization
                 type = obj.GetType();
             }
 
-            var start = stream.Position;
-
             WriteTypeInfo(stream, type);
 
             Write(stream, type, obj, backRefs);
 
-            var finish = stream.Position;
-
-            var byteCount = finish - start;
         }
 
         internal void SerializeGeneric<T>(Stream stream, T obj, List<object> backRefs) =>
@@ -1323,8 +1313,6 @@ namespace Robust.Shared.Serialization
 
             T obj;
 
-            var start = stream.Position;
-
             var type = ReadTypeInfo(stream);
             if (type == null)
             {
@@ -1336,18 +1324,12 @@ namespace Robust.Shared.Serialization
                 obj = (T) Read(stream, type, backRefs);
             }
 
-            var finish = stream.Position;
-
-            var byteCount = finish - start;
-
             return obj;
         }
 
         internal object Deserialize(Stream stream, List<object> backRefs)
         {
             object obj;
-
-            var start = stream.Position;
 
             var type = ReadTypeInfo(stream);
             if (type == null)
@@ -1360,9 +1342,6 @@ namespace Robust.Shared.Serialization
                 obj = Read(stream, type, backRefs);
             }
 
-            var finish = stream.Position;
-
-            var byteCount = finish - start;
             return obj;
         }
 

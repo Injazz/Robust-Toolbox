@@ -15,13 +15,13 @@ namespace Robust.Shared.Serialization
         public override void WriteLine(char[] buffer, int index, int count)
             => Trace.WriteLine(new string(buffer, index, count));
 
-        public override void Write(string? value)
+        public override void Write(string value)
             => Trace.Write(value);
 
         public override void WriteLine()
             => Trace.WriteLine("");
 
-        public override void WriteLine(string? value)
+        public override void WriteLine(string value)
             => Trace.WriteLine(value);
 
         public override Encoding Encoding

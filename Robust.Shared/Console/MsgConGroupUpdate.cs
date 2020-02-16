@@ -37,7 +37,7 @@ namespace Robust.Shared.Console
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             buffer.Write(ClientConGroup.Index);
             buffer.Write(ClientConGroup.Name);

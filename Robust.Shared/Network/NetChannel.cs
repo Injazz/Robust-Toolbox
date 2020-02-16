@@ -64,11 +64,13 @@ namespace Robust.Shared.Network
 
         private readonly NetConnection _connection;
 
+        /*
         private readonly TcpClient _tcpClient;
 
         private StatisticsGatheringStreamWrapper _backChannelInbound;
 
         private StatisticsGatheringStreamWrapper _backChannelOutbound;
+        */
 
         /// <inheritdoc />
         public long ConnectionId => _connection.RemoteUniqueIdentifier;
@@ -87,6 +89,7 @@ namespace Robust.Shared.Network
         /// </summary>
         public NetConnection Connection => _connection;
 
+        /*
         /// <summary>
         ///     Exposes the TCP connection.
         /// </summary>
@@ -158,58 +161,68 @@ namespace Robust.Shared.Network
             return buffer;
         }
 
-        public NetSessionId SessionId { get; }
-
         public bool BackChannelConnected => TcpClient.Connected;
 
         public int BackChannelDataAvailable => TcpClient.Client.Available;
+        */
 
+        public NetSessionId SessionId { get; }
+
+        /*
         private int _lastFlushedTick = -1;
 
         private TimeSpan _lastFlushedTime;
 
         public void FlushOutbound(bool force = false)
         {
-            var timing = IoCManager.Resolve<IGameTiming>();
-            var currentTick = timing.CurTick.Value;
-            var realTime = timing.RealTime;
-            if (force)
+            try
             {
-                _lastFlushedTick = (int) currentTick;
-                _lastFlushedTime = realTime;
-                BackChannelOutbound.Flush();
-            }
-
-            if (currentTick > _lastFlushedTick)
-            {
-                _lastFlushedTick = (int) currentTick;
-                _lastFlushedTime = realTime;
-                BackChannelOutbound.Flush();
-            }
-            else if (currentTick <= _lastFlushedTick)
-            {
-                var twoTicks = timing.TickPeriod * 60;
-                var deadline = _lastFlushedTime.Add(twoTicks);
-                if (realTime > deadline)
+                var timing = IoCManager.Resolve<IGameTiming>();
+                var currentTick = timing.CurTick.Value;
+                var realTime = timing.RealTime;
+                if (force)
                 {
-                    Logger.WarningS("net.tcp", $"Flushing outbound stream for an overly long tick: {currentTick}");
                     _lastFlushedTick = (int) currentTick;
                     _lastFlushedTime = realTime;
                     BackChannelOutbound.Flush();
                 }
+
+                if (currentTick > _lastFlushedTick)
+                {
+                    _lastFlushedTick = (int) currentTick;
+                    _lastFlushedTime = realTime;
+                    BackChannelOutbound.Flush();
+                }
+                else if (currentTick <= _lastFlushedTick)
+                {
+                    var twoTicks = timing.TickPeriod * 60;
+                    var deadline = _lastFlushedTime.Add(twoTicks);
+                    if (realTime > deadline)
+                    {
+                        Logger.WarningS("net.tcp", $"Flushing outbound stream for an overly long tick: {currentTick}");
+                        _lastFlushedTick = (int) currentTick;
+                        _lastFlushedTime = realTime;
+                        BackChannelOutbound.Flush();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.ErrorS("net.tcp", $"Unable to attempt to flush outbound back channel stream due to {ex.GetType().Name}: {ex.Message}");
             }
         }
+        */
 
         /// <summary>
         ///     Creates a new instance of a NetChannel.
         /// </summary>
         /// <param name="manager">The server this channel belongs to.</param>
         /// <param name="connection">The raw NetConnection to the remote peer.</param>
-        internal NetChannel(NetManager manager, NetConnection connection, NetSessionId sessionId, TcpClient tcpClient)
+        internal NetChannel(NetManager manager, NetConnection connection, NetSessionId sessionId) //, TcpClient tcpClient)
         {
             _manager = manager;
             _connection = connection;
-            _tcpClient = tcpClient;
+            //_tcpClient = tcpClient;
             SessionId = sessionId;
         }
 
@@ -232,8 +245,10 @@ namespace Robust.Shared.Network
             if (_connection.Status == NetConnectionStatus.Connected)
                 _connection.Disconnect(reason);
 
+            /*
             if (_tcpClient.Connected )
                 _tcpClient.Dispose();
+            */
         }
 
     }

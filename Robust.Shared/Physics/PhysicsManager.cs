@@ -193,12 +193,12 @@ namespace Robust.Shared.Physics
         public void RemoveBody(IPhysBody physBody)
         {
 
-            var removeAttempted = false;
+            //var removeAttempted = false;
             var removed = false;
 
             if (physBody.Owner.Deleted || physBody.Owner.Transform.Deleted)
             {
-                removeAttempted = true;
+                //removeAttempted = true;
                 foreach (var mapId in _mapManager.GetAllMapIds())
                 {
                     removed = this[mapId].Remove(physBody);
@@ -216,9 +216,9 @@ namespace Robust.Shared.Physics
                 {
                     removed = this[physBody.MapID].Remove(physBody);
                 }
-                catch (InvalidOperationException ioex)
+                catch (InvalidOperationException)
                 {
-                    removeAttempted = true;
+                    //removeAttempted = true;
                     // TODO: TryGetMapId or something
                     foreach (var mapId in _mapManager.GetAllMapIds())
                     {

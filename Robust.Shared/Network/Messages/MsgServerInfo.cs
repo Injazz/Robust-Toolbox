@@ -24,7 +24,7 @@ namespace Robust.Shared.Network.Messages
             PlayerSessionId = new NetSessionId(buffer.ReadString());
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             buffer.Write(ServerName);
             buffer.Write(ServerMaxPlayers);

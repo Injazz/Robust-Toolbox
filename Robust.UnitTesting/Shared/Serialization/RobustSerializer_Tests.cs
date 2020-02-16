@@ -296,6 +296,7 @@ namespace Robust.UnitTesting.Shared.GameObjects
             Console.WriteLine(BitConverter.ToString(array).Replace('-', ' '));
         }
 
+#pragma warning disable 649
         private struct NullableWrapper<T> where T : struct
         {
 
@@ -303,6 +304,7 @@ namespace Robust.UnitTesting.Shared.GameObjects
             public T? Value;
 
         }
+#pragma warning restore 649
 
         [Test]
         public unsafe void RoundTripNullableIntNullStruct()

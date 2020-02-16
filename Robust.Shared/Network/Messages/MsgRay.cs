@@ -28,7 +28,7 @@ namespace Robust.Shared.Network.Messages
             RayHit = buffer.ReadVector2();
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool willBeCompressed = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
         {
             buffer.Write(DidHit);
             buffer.Write(RayOrigin);

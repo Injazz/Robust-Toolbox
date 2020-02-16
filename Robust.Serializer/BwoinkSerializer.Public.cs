@@ -1,28 +1,36 @@
 using System;
-using System.Buffers;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
-using K4os.Compression.LZ4;
-using K4os.Compression.LZ4.Streams;
-using Newtonsoft.Json.Serialization;
+using Joveler.Compression.XZ;
 using Robust.Shared.Interfaces.Serialization;
+using Robust.Shared.Network;
 
 namespace Robust.Shared.Serialization
 {
 
     public partial class BwoinkSerializer : IRobustSerializer
     {
+        public static long TotalBytesWritten { get; private set; }
+        public static long TotalBytesRead { get; private set; }
+        public static long TotalBytesCompressed { get; private set; }
+        public static long TotalBytesDecompressed { get; private set; }
 
-        private static readonly LZ4EncoderSettings Lz4EncoderSettings = new LZ4EncoderSettings {BlockSize = 4 * 1024 * 1024, ChainBlocks = true, CompressionLevel = LZ4Level.L09_HC, ExtraMemory = 12 * 1024 * 1024};
+        public long BytesWritten { get; private set; }
+        public long BytesRead { get; private set; }
+        public long BytesCompressed { get; private set; }
+        public long BytesDecompressed { get; private set; }
 
         public void Initialize()
         {
+            BytesWritten = 0;
+            BytesRead = 0;
+            BytesCompressed = 0;
+            BytesDecompressed = 0;
         }
 
         [Conditional("DEBUG")]
@@ -82,16 +90,22 @@ namespace Robust.Shared.Serialization
         {
             if (UseCompression)
             {
-                using var encodeStream = LZ4Stream.Encode(stream, Lz4EncoderSettings, leaveOpen: true);
-
+                var compStatsStream = new StatisticsGatheringStreamWrapper(stream);
+                using var encodeStream = new XZStream(compStatsStream, XzEncOpts);
+                var writeStatsStream = new StatisticsGatheringStreamWrapper(encodeStream);
                 Serialize(encodeStream, obj, new List<object>());
+                BytesWritten += writeStatsStream.BytesWritten;
+                BytesCompressed += compStatsStream.BytesWritten;
+                TotalBytesWritten += writeStatsStream.BytesWritten;
+                TotalBytesCompressed += compStatsStream.BytesWritten;
             }
             else
             {
                 AttachRecordingStreamWrapper(ref stream);
-
-                Serialize(stream, obj, new List<object>());
-
+                var writeStatsStream = new StatisticsGatheringStreamWrapper(stream);
+                Serialize(writeStatsStream, obj, new List<object>());
+                BytesWritten += writeStatsStream.BytesWritten;
+                TotalBytesWritten += writeStatsStream.BytesWritten;
                 RecordSerialized(stream);
             }
         }
@@ -100,33 +114,50 @@ namespace Robust.Shared.Serialization
         {
             if (UseCompression)
             {
-                using var encodeStream = LZ4Stream.Encode(stream, Lz4EncoderSettings, leaveOpen: true);
+                var compStatsStream = new StatisticsGatheringStreamWrapper(stream);
+                using var encodeStream = new XZStream(compStatsStream, XzEncOpts);
+                var writeStatsStream = new StatisticsGatheringStreamWrapper(encodeStream);
                 Serialize(encodeStream, obj, new List<object>());
+                BytesWritten += writeStatsStream.BytesWritten;
+                BytesCompressed += compStatsStream.BytesWritten;
+                TotalBytesWritten += writeStatsStream.BytesWritten;
+                TotalBytesCompressed += compStatsStream.BytesWritten;
             }
             else
             {
                 AttachRecordingStreamWrapper(ref stream);
-
-                Serialize(stream, obj, new List<object>());
-
+                var writeStatsStream = new StatisticsGatheringStreamWrapper(stream);
+                Serialize(writeStatsStream, obj, new List<object>());
+                BytesWritten += writeStatsStream.BytesWritten;
+                TotalBytesWritten += writeStatsStream.BytesWritten;
                 RecordSerialized(stream);
             }
         }
+
 
         public T Deserialize<T>(Stream stream)
         {
             if (UseCompression)
             {
-                using var decodeStream = LZ4Stream.Decode(stream, leaveOpen: true);
-                return Deserialize<T>(decodeStream, new List<object>());
+                var dcmpStatsStream = new StatisticsGatheringStreamWrapper(stream);
+                using var decodeStream = new XZStream(dcmpStatsStream, XzDecOpts);
+                var readStatsStream = new StatisticsGatheringStreamWrapper(decodeStream);
+                var result = Deserialize<T>(readStatsStream, new List<object>());
+                BytesRead += readStatsStream.BytesWritten;
+                BytesDecompressed += dcmpStatsStream.BytesWritten;
+                TotalBytesRead += readStatsStream.BytesWritten;
+                TotalBytesDecompressed += dcmpStatsStream.BytesWritten;
+                return result;
             }
             else
             {
                 RecordDeserializing(stream);
-
                 AttachRecordingStreamWrapper(ref stream);
-
-                return Deserialize<T>(stream, new List<object>());
+                var readStatsStream = new StatisticsGatheringStreamWrapper(stream);
+                var result = Deserialize<T>(stream, new List<object>());
+                BytesRead += readStatsStream.BytesWritten;
+                TotalBytesRead += readStatsStream.BytesWritten;
+                return result;
             }
         }
 
@@ -134,16 +165,25 @@ namespace Robust.Shared.Serialization
         {
             if (UseCompression)
             {
-                using var decodeStream = LZ4Stream.Decode(stream, leaveOpen: true);
-                return Deserialize(decodeStream, new List<object>());
+                var dcmpStatsStream = new StatisticsGatheringStreamWrapper(stream);
+                using var decodeStream = new XZStream(dcmpStatsStream, XzDecOpts);
+                var readStatsStream = new StatisticsGatheringStreamWrapper(decodeStream);
+                var result = Deserialize(decodeStream, new List<object>());
+                BytesRead += readStatsStream.BytesWritten;
+                BytesDecompressed += dcmpStatsStream.BytesWritten;
+                TotalBytesRead += readStatsStream.BytesWritten;
+                TotalBytesDecompressed += dcmpStatsStream.BytesWritten;
+                return result;
             }
             else
             {
                 RecordDeserializing(stream);
-
                 AttachRecordingStreamWrapper(ref stream);
-
-                return Deserialize(stream, new List<object>());
+                var readStatsStream = new StatisticsGatheringStreamWrapper(stream);
+                var result = Deserialize(stream, new List<object>());
+                BytesRead += readStatsStream.BytesWritten;
+                TotalBytesRead += readStatsStream.BytesWritten;
+                return result;
             }
         }
 
@@ -236,6 +276,23 @@ namespace Robust.Shared.Serialization
         private readonly HashSet<string> _stringSet = new HashSet<string>();
 
         private readonly ReadOnlyCollection<string> _stringTableWrapper;
+
+        private static readonly XZCompressOptions XzEncOpts = new XZCompressOptions
+        {
+            BufferSize = 4 * 1024 * 1024,
+            Check = LzmaCheck.None,
+            ExtremeFlag = false,
+            Level = LzmaCompLevel.Level1,
+            LeaveOpen = true
+        };
+
+        private static readonly XZDecompressOptions XzDecOpts = new XZDecompressOptions
+        {
+            BufferSize = 4 * 1024 * 1024,
+            DecodeFlags = LzmaDecodingFlag.Concatenated | LzmaDecodingFlag.IgnoreCheck,
+            MemLimit = 24 * 1024 * 1024,
+            LeaveOpen = true
+        };
 
         public BwoinkSerializer()
         {

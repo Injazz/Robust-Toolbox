@@ -84,6 +84,7 @@ namespace Robust.Client.UserInterface.CustomControls
             LastSentPackets = stats.SentPackets;
             LastReceivedPackets = stats.ReceivedPackets;
 
+            /*
             var tcpSentBytes = 0L;
             var tcpRecvBytes = 0L;
             var tcpSentBytesCmp = 0L;
@@ -111,12 +112,13 @@ namespace Robust.Client.UserInterface.CustomControls
                     tcpRecvBytesCmp += ch.BackChannelBytesReceivedCompressed;
                 }
             }
+            */
 
             contents.Text = $@"Lidgren {{UP: {sentBytes / ONE_KIBIBYTE:N} KiB/s, {sentPackets} pckt/s, {LastSentBytes / ONE_KIBIBYTE:N} KiB, {LastSentPackets} pckt
 DOWN: {receivedBytes / ONE_KIBIBYTE:N} KiB/s, {receivedPackets} pckt/s, {LastReceivedBytes / ONE_KIBIBYTE:N} KiB, {LastReceivedPackets} pckt
-PING: {NetManager.ServerChannel?.Ping ?? -1} ms}}"
-            + $" Back Channel {{ {tcpSentBytesCmp / ONE_KIBIBYTE:N} ({tcpSentBytes / ONE_KIBIBYTE:N}) KiB Sent, {tcpRecvBytesCmp / ONE_KIBIBYTE:N} ({tcpRecvBytes / ONE_KIBIBYTE:N}) KiB Recv }}";
-
+PING: {NetManager.ServerChannel?.Ping ?? -1} ms}}" /*
+            + $" Back Channel {{ {tcpSentBytesCmp / ONE_KIBIBYTE:N} ({tcpSentBytes / ONE_KIBIBYTE:N}) KiB Sent, {tcpRecvBytesCmp / ONE_KIBIBYTE:N} ({tcpRecvBytes / ONE_KIBIBYTE:N}) KiB Recv }}"
+            */;
             MinimumSizeChanged();
         }
 
