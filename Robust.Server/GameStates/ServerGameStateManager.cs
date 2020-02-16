@@ -5,12 +5,14 @@ using Robust.Server.Interfaces.GameState;
 using Robust.Server.Interfaces.Player;
 using Robust.Shared.Configuration;
 using Robust.Shared.Enums;
+using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
 using Robust.Shared.Interfaces.Configuration;
 using Robust.Shared.Interfaces.Map;
 using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Timing;
 using Robust.Shared.IoC;
+using Robust.Shared.Maths;
 using Robust.Shared.Network;
 using Robust.Shared.Network.Messages;
 using Robust.Shared.Timing;
@@ -89,6 +91,8 @@ namespace Robust.Server.GameStates
                 DebugTools.Assert("How did the client send us an ack without being connected?");
         }
 
+        private IDictionary<IPlayerSession, IList<EntityState>> _lastEntityStates = new Dictionary<IPlayerSession, IList<EntityState>>();
+
         /// <inheritdoc />
         public void SendGameStateUpdate()
         {
@@ -104,7 +108,7 @@ namespace Robust.Server.GameStates
 
             var oldestAck = GameTick.MaxValue;
 
-            var work = new List<(INetChannel channel, GameTick lastAck)>();
+            var work = new List<(IPlayerSession session, INetChannel channel, GameTick lastAck)>();
 
             foreach (var channel in _networkManager.Channels)
             {
@@ -120,7 +124,7 @@ namespace Robust.Server.GameStates
                     DebugTools.Assert("Why does this channel not have an entry?");
                 }
 
-                work.Add((channel, lastAck));
+                work.Add((session, channel, lastAck));
 
                 if (lastAck < oldestAck)
                 {
@@ -158,17 +162,23 @@ namespace Robust.Server.GameStates
             }
         }
 
-        private (INetChannel channel, GameState state) GenerateStateFor((INetChannel channel, GameTick lastAck) job)
+        private (INetChannel channel, GameState state) GenerateStateFor((IPlayerSession session, INetChannel channel, GameTick lastAck) job)
         {
-            var (channel, lastAck) = job;
+            var (session, channel, lastAck) = job;
+            //TODO: Cull these based on client view rectangle, remember the issues with transform parenting
 
-            var entities = _entityManager.GetEntityStates(lastAck);
+            var entities = lastAck == GameTick.Zero
+                ? _entityManager.GetEntityStates(lastAck)
+                : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, 3f);
             var players = _playerManager.GetPlayerStates(lastAck);
             var deletions = _entityManager.GetDeletedEntities(lastAck);
             var mapData = _mapManager.GetStateData(lastAck);
 
-            // lastAck varies with each client based on lag and such,
-            // we can't just make 1 global state and send it to everyone
+            // TODO: check for teleporters
+
+            _lastEntityStates[session] = entities;
+
+            // lastAck varies with each client based on lag and such, we can't just make 1 global state and send it to everyone
             var state = new GameState(lastAck, _gameTiming.CurTick, entities, players, deletions, mapData);
 
             return (channel, state);

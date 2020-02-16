@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Linq;
 using Robust.Shared.GameObjects.Components;
 using Robust.Shared.GameObjects.Components.Transform;
@@ -117,7 +119,7 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         /// <param name="uid"></param>
         /// <returns>Entity or null if entity id doesn't exist</returns>
-        public IEntity GetEntity(EntityUid uid)
+        public virtual IEntity GetEntity(EntityUid uid)
         {
             return Entities[uid];
         }
@@ -495,6 +497,13 @@ namespace Robust.Shared.GameObjects
         public IEnumerable<IEntity> GetEntitiesInRange(MapId mapId, Box2 box, float range)
         {
             var aabb = box.Enlarged(range);
+            return GetEntitiesIntersecting(mapId, aabb);
+        }
+
+        /// <inheritdoc />
+        public IEnumerable<IEntity> GetEntitiesInRange(MapId mapId, Vector2 point, float range)
+        {
+            var aabb = new Box2(point, point).Enlarged(range);
             return GetEntitiesIntersecting(mapId, aabb);
         }
 
