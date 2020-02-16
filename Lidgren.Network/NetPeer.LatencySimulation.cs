@@ -199,7 +199,11 @@ namespace Lidgren.Network
 		{
 			try
 			{
-				m_socket.DontFragment = true;
+				//m_socket.DontFragment = true;
+				m_socket.SetSocketOption(
+					m_socket.AddressFamily == AddressFamily.InterNetworkV6 ? SocketOptionLevel.IPv6 : SocketOptionLevel.IP,
+					SocketOptionName.DontFragment, true);
+
 				int bytesSent = m_socket.SendTo(m_sendBuffer, 0, numBytes, SocketFlags.None, target);
 				if (numBytes != bytesSent)
 					LogWarning("Failed to send the full " + numBytes + "; only " + bytesSent + " bytes sent in packet!");
@@ -226,7 +230,11 @@ namespace Lidgren.Network
 			}
 			finally
 			{
-				m_socket.DontFragment = false;
+				//m_socket.DontFragment = false;
+				
+				m_socket.SetSocketOption(
+					m_socket.AddressFamily == AddressFamily.InterNetworkV6 ? SocketOptionLevel.IPv6 : SocketOptionLevel.IP,
+					SocketOptionName.DontFragment, false);
 			}
 			return true;
 		}
@@ -235,7 +243,11 @@ namespace Lidgren.Network
 		{
 			try
 			{
-				m_socket.DontFragment = true;
+				//m_socket.DontFragment = true;
+				m_socket.SetSocketOption(
+					m_socket.AddressFamily == AddressFamily.InterNetworkV6 ? SocketOptionLevel.IPv6 : SocketOptionLevel.IP,
+					SocketOptionName.DontFragment, true);
+
 				int bytesSent = m_socket.SendTo(m_sendBuffer, 0, numBytes, SocketFlags.None, target);
 				if (numBytes != bytesSent)
 					LogWarning("Failed to send the full " + numBytes + "; only " + bytesSent + " bytes sent in packet!");
@@ -260,7 +272,10 @@ namespace Lidgren.Network
 			}
 			finally
 			{
-				m_socket.DontFragment = false;
+				//m_socket.DontFragment = false;
+				m_socket.SetSocketOption(
+					m_socket.AddressFamily == AddressFamily.InterNetworkV6 ? SocketOptionLevel.IPv6 : SocketOptionLevel.IP,
+					SocketOptionName.DontFragment, false);
 			}
 			return true;
 		}

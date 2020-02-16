@@ -638,6 +638,9 @@ namespace Robust.Shared.Network
 
             netConfig.ConnectionTimeout = 30000f;
 #endif
+            netConfig.MaximumTransmissionUnit = 1200;
+            netConfig.AutoExpandMTU = true;
+
             return netConfig;
         }
 
@@ -1067,18 +1070,13 @@ namespace Robust.Shared.Network
             DebugTools.Assert(IsServer);
 
             if (!IsConnected)
-                return;
-
-            foreach (var peer in _netPeers)
             {
-                var packet = BuildMessage(message, peer);
-                var method = message.DeliveryMethod;
-                if (peer.ConnectionsCount == 0)
-                {
-                    continue;
-                }
+                return;
+            }
 
-                peer.SendMessage(packet, peer.Connections, method, 0);
+            foreach (var (_,channel) in _channels)
+            {
+                ServerSendMessage(message, channel);
             }
         }
 
@@ -1098,7 +1096,7 @@ namespace Robust.Shared.Network
 
             var packetSize = packet.LengthBytes;
             DebugTools.Assert(packetSize > 0);
-            if (connection.WillBeQueued(packetSize))
+            if (packetSize > 1024 || connection.WillBeQueued(packetSize))
             {
                 try
                 {

@@ -48,7 +48,7 @@ namespace Robust.Server.GameStates
             _networkManager.Disconnect += HandleClientDisconnect;
 
             _configurationManager.RegisterCVar("net.parallelstates", false, CVar.ARCHIVE);
-            _configurationManager.RegisterCVar("net.maxupdaterange", 25f, CVar.ARCHIVE);
+            _configurationManager.RegisterCVar("net.maxupdaterange", 12.5f, CVar.ARCHIVE);
         }
 
         private void HandleClientConnected(object sender, NetChannelArgs e)
