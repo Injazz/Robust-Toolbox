@@ -48,6 +48,7 @@ namespace Robust.Server.GameStates
             _networkManager.Disconnect += HandleClientDisconnect;
 
             _configurationManager.RegisterCVar("net.parallelstates", false, CVar.ARCHIVE);
+            _configurationManager.RegisterCVar("net.maxupdaterange", 25f, CVar.ARCHIVE);
         }
 
         private void HandleClientConnected(object sender, NetChannelArgs e)
@@ -92,6 +93,11 @@ namespace Robust.Server.GameStates
         }
 
         private IDictionary<IPlayerSession, IList<EntityState>> _lastEntityStates = new Dictionary<IPlayerSession, IList<EntityState>>();
+
+        private float? _maxUpdateRangeCache;
+
+        private float MaxUpdateRange => _maxUpdateRangeCache
+            ??= _configurationManager.GetCVar<float>("net.maxupdaterange");
 
         /// <inheritdoc />
         public void SendGameStateUpdate()
@@ -169,7 +175,7 @@ namespace Robust.Server.GameStates
 
             var entities = lastAck == GameTick.Zero
                 ? _entityManager.GetEntityStates(lastAck)
-                : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, 3f);
+                : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, MaxUpdateRange);
             var players = _playerManager.GetPlayerStates(lastAck);
             var deletions = _entityManager.GetDeletedEntities(lastAck);
             var mapData = _mapManager.GetStateData(lastAck);
