@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading;
 using System.Collections.Generic;
+using System.Net.Sockets;
 
 namespace Lidgren.Network
 {
@@ -165,5 +166,16 @@ namespace Lidgren.Network
 
 			return;
 		}
+
+		private static void SetDontFragment(Socket socket, bool value)
+		{
+			if (socket.AddressFamily == AddressFamily.InterNetworkV6)
+			{
+				return;
+			}
+			
+			socket.DontFragment = true;
+		}
+
 	}
 }

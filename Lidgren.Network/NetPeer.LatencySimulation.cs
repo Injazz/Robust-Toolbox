@@ -199,10 +199,7 @@ namespace Lidgren.Network
 		{
 			try
 			{
-				//m_socket.DontFragment = true;
-				m_socket.SetSocketOption(
-					m_socket.AddressFamily == AddressFamily.InterNetworkV6 ? SocketOptionLevel.IPv6 : SocketOptionLevel.IP,
-					SocketOptionName.DontFragment, true);
+				SetDontFragment(m_socket, true);
 
 				int bytesSent = m_socket.SendTo(m_sendBuffer, 0, numBytes, SocketFlags.None, target);
 				if (numBytes != bytesSent)
@@ -231,13 +228,11 @@ namespace Lidgren.Network
 			finally
 			{
 				//m_socket.DontFragment = false;
-				
-				m_socket.SetSocketOption(
-					m_socket.AddressFamily == AddressFamily.InterNetworkV6 ? SocketOptionLevel.IPv6 : SocketOptionLevel.IP,
-					SocketOptionName.DontFragment, false);
+				SetDontFragment(m_socket, false);
 			}
 			return true;
 		}
+
 #else
 		internal bool SendMTUPacket(int numBytes, NetEndPoint target)
 		{
