@@ -187,7 +187,7 @@ namespace Robust.Shared.IoC
             }
             catch (Exception)
             {
-                var filePath = Path.Combine(Environment.CurrentDirectory, assembly + ".dll");
+                var filePath = Path.Combine(PathHelpers.GetExecutableDirectory(), assembly + ".dll");
                 asm = Assembly.LoadFrom(filePath);
             }
 

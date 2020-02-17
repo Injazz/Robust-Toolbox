@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Joveler.Compression.XZ;
 using Lidgren.Network;
+using Robust.Shared.ContentPack;
 using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Timing;
 using Robust.Shared.IoC;
@@ -34,18 +35,19 @@ namespace Robust.Shared.Network
             };
 
             string libPath = null;
+            var binDir = PathHelpers.GetExecutableDirectory();
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                libPath = Path.Combine(Environment.CurrentDirectory, arch, "liblzma.dll");
+                libPath = Path.Combine(binDir, arch, "liblzma.dll");
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                libPath = Path.Combine(Environment.CurrentDirectory, arch, "liblzma.so");
+                libPath = Path.Combine(binDir, arch, "liblzma.so");
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             {
-                libPath = Path.Combine(Environment.CurrentDirectory, arch, "liblzma.dylib");
+                libPath = Path.Combine(binDir, arch, "liblzma.dylib");
             }
 
             if (libPath == null || !File.Exists(libPath))
