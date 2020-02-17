@@ -22,7 +22,10 @@ namespace Robust.Shared.Serialization
 
         // this is static readonly so dependencies will not have const prop,
         // so when assembly is updated they don't need to rebuild
+        // generics increase by multiples of this if they are not mapped
         public static readonly int RobustNetTypeInfoSize = 4;
+
+        private static HashSet<Type> _seenNewTypes = new HashSet<Type>();
 
         // TODO: use IoC?
         private static Assembly[] _Assemblies =
@@ -357,6 +360,11 @@ namespace Robust.Shared.Serialization
                     else
                     {
                         throw new NotSupportedException($"No type index mapping for {type.FullName}");
+                    }
+
+                    if (_seenNewTypes.Add(type))
+                    {
+                        Trace.WriteLine($"Unmapped type: {type}");
                     }
                 }
 

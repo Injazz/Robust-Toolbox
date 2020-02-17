@@ -48,7 +48,8 @@ namespace Robust.Server.GameStates
             _networkManager.Disconnect += HandleClientDisconnect;
 
             _configurationManager.RegisterCVar("net.parallelstates", false, CVar.ARCHIVE);
-            _configurationManager.RegisterCVar("net.maxupdaterange", 12.5f, CVar.ARCHIVE);
+            //_configurationManager.RegisterCVar("net.maxupdaterange", 12.5f, CVar.ARCHIVE);
+            _configurationManager.RegisterCVar("net.maxupdaterange", 2f, CVar.ARCHIVE);
         }
 
         private void HandleClientConnected(object sender, NetChannelArgs e)
@@ -155,7 +156,7 @@ namespace Robust.Server.GameStates
                 if (stateUpdateMessage.ShouldSendReliably())
                 {
                     _ackedStates[channel.ConnectionId] = _gameTiming.CurTick;
-            }
+                }
             }
 
             // keep the deletion history buffers clean

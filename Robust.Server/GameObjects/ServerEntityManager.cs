@@ -177,6 +177,24 @@ namespace Robust.Server.GameObjects
             return tick;
         }
 
+        private GameTick UpdateLastSeenTick(IPlayerSession player, EntityUid uid, GameTick newTick)
+        {
+            if (!_playerLastSeen.TryGetValue(player, out var lastSeen))
+            {
+                lastSeen = new Dictionary<EntityUid, GameTick>();
+                _playerLastSeen[player] = lastSeen;
+            }
+
+            if (!lastSeen.TryGetValue(uid, out var oldTick))
+            {
+                oldTick = GameTick.Zero;
+            }
+
+            lastSeen[uid] = newTick;
+
+            return oldTick;
+        }
+
         private IEnumerable<EntityUid> GetLastSeenAfter(IPlayerSession player, GameTick fromTick)
         {
             if (!_playerLastSeen.TryGetValue(player, out var lastSeen))
@@ -193,6 +211,24 @@ namespace Robust.Server.GameObjects
                 }
             }
         }
+
+        private IEnumerable<EntityUid> GetLastSeenOn(IPlayerSession player, GameTick fromTick)
+        {
+            if (!_playerLastSeen.TryGetValue(player, out var lastSeen))
+            {
+                lastSeen = new Dictionary<EntityUid, GameTick>();
+                _playerLastSeen[player] = lastSeen;
+            }
+
+            foreach (var (uid, tick) in lastSeen)
+            {
+                if (tick == fromTick)
+                {
+                    yield return uid;
+                }
+            }
+        }
+
         private void SetLastSeenTick(IPlayerSession player, EntityUid uid, GameTick tick)
         {
             if (!_playerLastSeen.TryGetValue(player, out var lastSeen))
@@ -257,66 +293,9 @@ namespace Robust.Server.GameObjects
             var includedEnts = new HashSet<EntityUid>();
             var entityStates = new List<EntityState>();
 
-            // if this isn't a continuous tick update frame, update everything not seen since
-            // cause the bubble at frames other than this and last tick are unknown
-            if ((_timing.CurTick.Value - fromTick.Value) > 1)
-            {
-                foreach (var uid in GetLastSeenAfter(player, fromTick))
-                {
-                    if (!TryGetEntity(uid, out var entity))
-                    {
-                        continue;
-                    }
-
-                    if (entity.Deleted)
-                    {
-                        continue;
-                    }
-
-                    seenMovers.Add(uid);
-                }
-            }
-            else
-            {
-                // grab things that were in seen last known tick
-                // check to see if anything is no longer in the previous bubble or the current bubble
-                foreach (var uid in GetLastSeenAfter(player, fromTick))
-                {
-                    if (!TryGetEntity(uid, out var entity))
-                    {
-                        continue;
-                    }
-
-                    if (entity.Deleted)
-                    {
-                        continue;
-                    }
-
-                    var txf = entity.Transform;
-
-                    if (!txf.Initialized)
-                    {
-                        continue;
-                    }
-
-                    var entPos = txf.WorldPosition;
-
-                    if ((entPos - position).Length <= range)
-                    {
-                        continue;
-                    }
-
-                    if ((entPos - lastPos).Length > range)
-                    {
-                        seenMovers.Add(uid);
-                    }
-                }
-
-            }
-
             foreach (var uid in seenMovers.ToList())
             {
-                if (!TryGetEntity(uid, out var entity))
+                if (!TryGetEntity(uid, out var entity) || entity.Deleted)
                 {
                     seenMovers.Remove(uid);
                     continue;
@@ -330,17 +309,18 @@ namespace Robust.Server.GameObjects
                     }
                 }
 
-                var entityState = GetEntityState(ComponentManager, uid, fromTick);
-                entityStates.Add(entityState);
+                var state = GetEntityState(ComponentManager, uid, fromTick);
+                entityStates.Add(state);
 
-                if (entityState.ComponentStates != null && (entity.Transform.WorldPosition - position).Length > range)
+                if (state.ComponentStates != null && (entity.Transform.WorldPosition - position).Length > range)
                 {
-                    var idx = entityState.ComponentStates.FindIndex(x => x is TransformComponent.TransformComponentState);
+                    var idx = state.ComponentStates
+                        .FindIndex(x => x is TransformComponent.TransformComponentState);
                     if (idx != -1)
                     {
-                        var oldState = (TransformComponent.TransformComponentState) entityState.ComponentStates[idx];
+                        var oldState = (TransformComponent.TransformComponentState) state.ComponentStates[idx];
                         var newState = new TransformComponent.TransformComponentState(Vector2NaN, oldState.Rotation, oldState.ParentID);
-                        entityState.ComponentStates[idx] = newState;
+                        state.ComponentStates[idx] = newState;
                         seenMovers.Remove(uid);
                     }
                 }
@@ -356,12 +336,12 @@ namespace Robust.Server.GameObjects
 
                 var uid = entity.Uid;
 
+                var lastSeen = UpdateLastSeenTick(player, uid, fromTick);
+
                 if (includedEnts.Contains(uid))
                 {
                     continue;
                 }
-
-                var lastSeen = GetLastSeenTick(player, uid);
 
                 if (lastChange < lastSeen && lastChange <= fromTick)
                 {
@@ -371,8 +351,6 @@ namespace Robust.Server.GameObjects
                 includedEnts.Add(uid);
 
                 entityStates.Add(GetEntityState(ComponentManager, uid, lastSeen));
-
-                SetLastSeenTick(player, uid, fromTick);
 
                 if (!entity.TryGetComponent(out PhysicsComponent body))
                 {
@@ -389,31 +367,33 @@ namespace Robust.Server.GameObjects
                 }
             }
 
-            // save positions of entities that are in the within the current bubble
-            var positions = new Dictionary<EntityUid,Vector2>();
-
-            foreach (var entState in entityStates)
+            var priorTick = new GameTick(fromTick.Value - 1);
+            foreach (var uid in GetLastSeenOn(player, priorTick))
             {
-                var uid = entState.Uid;
-                var ent = GetEntity(uid);
-                if (ent.Deleted || !ent.Initialized)
+                if (!includedEnts.Contains(uid))
                 {
-                    continue;
-                }
+                    if (!TryGetEntity(uid, out var entity) || entity.Deleted)
+                    {
+                        // TODO: remove from states list being sent?
+                        continue;
+                    }
 
-                var txf = ent.Transform;
-                if (!txf.Initialized)
-                {
-                    continue;
-                }
+                    var state = GetEntityState(ComponentManager, uid, fromTick);
+                    entityStates.Add(state);
+                    if (state.ComponentStates != null && (entity.Transform.WorldPosition - position).Length > range)
+                    {
+                        var idx = state.ComponentStates
+                            .FindIndex(x => x is TransformComponent.TransformComponentState);
+                        if (idx == -1)
+                        {
+                            continue;
+                        }
 
-                // exclude saving positions that are outside the bubble
-                if ((txf.WorldPosition - position).Length < range)
-                {
-                    continue;
+                        var oldState = (TransformComponent.TransformComponentState) state.ComponentStates[idx];
+                        var newState = new TransformComponent.TransformComponentState(Vector2NaN, oldState.Rotation, oldState.ParentID);
+                        state.ComponentStates[idx] = newState;
+                    }
                 }
-
-                positions[uid] = txf.WorldPosition;
             }
 
             // no point sending an empty collection

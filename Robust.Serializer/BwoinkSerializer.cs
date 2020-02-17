@@ -172,7 +172,7 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        internal void WriteNonGenericEnumerable(Stream stream, [CanBeNull,ItemCanBeNull] IEnumerable items, List<object> backRefs)
+        internal void WriteNonGenericEnumerable(Stream stream, [CanBeNull, ItemCanBeNull] IEnumerable items, List<object> backRefs)
         {
             if (items == null)
             {
@@ -188,7 +188,7 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        [CanBeNull,ItemCanBeNull]
+        [CanBeNull, ItemCanBeNull]
         internal IEnumerable ReadNonGenericEnumerable(Stream stream, List<object> backRefs, out int len)
         {
             var buf = new byte[4];
@@ -209,7 +209,7 @@ namespace Robust.Shared.Serialization
             return ReadNonGenericEnumerableInternal(stream, backRefs, len);
         }
 
-        [CanBeNull,ItemCanBeNull]
+        [CanBeNull, ItemCanBeNull]
         internal IEnumerable ReadNonGenericEnumerableInternal(Stream stream, List<object> backRefs, int len)
         {
             for (var i = 0; i < len; ++i)
@@ -219,7 +219,7 @@ namespace Robust.Shared.Serialization
         }
 
         internal void WriteGenericEnumerable(Stream stream, [CanBeNull] Type itemType,
-            [CanBeNull,ItemCanBeNull] IEnumerable items, List<object> backRefs, bool skipElemTypeInfo = true)
+            [CanBeNull, ItemCanBeNull] IEnumerable items, List<object> backRefs, bool skipElemTypeInfo = true)
         {
             if (itemType == null)
             {
@@ -387,7 +387,7 @@ namespace Robust.Shared.Serialization
             return 0;
         }
 
-        [CanBeNull,ItemCanBeNull]
+        [CanBeNull, ItemCanBeNull]
         internal static IEnumerable<T> ReadGenericEnumerableGeneric<T>(BwoinkSerializer szr, Stream stream, List<object> backRefs, StrongBox<int> lengthBox)
         {
             var buf = new byte[4];
@@ -410,8 +410,7 @@ namespace Robust.Shared.Serialization
             return ReadGenericEnumerableGenericInternal<T>(szr, stream, backRefs, len);
         }
 
-
-        [CanBeNull,ItemCanBeNull]
+        [CanBeNull, ItemCanBeNull]
         internal static IEnumerable<T> ReadGenericEnumerableGenericInternal<T>(BwoinkSerializer szr, Stream stream, List<object> backRefs, int len)
         {
             var type = typeof(T);
@@ -750,7 +749,7 @@ namespace Robust.Shared.Serialization
 
         [NotNull]
         internal static TDelegate CreateDelegate<TDelegate>(Type type, BindingFlags bindingFlags, string name, params Type[] genTypes) where TDelegate : Delegate =>
-            NotNullCast<TDelegate,Delegate>(type
+            NotNullCast<TDelegate, Delegate>(type
                 .GetMethod(name, bindingFlags)
                 ?.MakeGenericMethod(genTypes)
                 .CreateDelegate(typeof(TDelegate))
@@ -775,7 +774,7 @@ namespace Robust.Shared.Serialization
             return dlg(bytes);
         }
 
-        private static Dictionary<Type, ConstructorInfo> _ctorCache = new Dictionary<Type, ConstructorInfo>();
+        private static Dictionary<Type, MethodBase> _factoryCache = new Dictionary<Type, MethodBase>();
 
         private static readonly Comparer<FieldInfo> FieldComparer = Comparer<FieldInfo>.Create((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
 
@@ -1045,9 +1044,9 @@ namespace Robust.Shared.Serialization
             // ReSharper disable once ConditionIsAlwaysTrueOrFalse
             if (typedEnum != null)
             {
-                if (_ctorCache.TryGetValue(type, out var ctor))
+                if (_factoryCache.TryGetValue(type, out var m))
                 {
-                    var paramType = ctor.GetParameters()[0].ParameterType;
+                    var paramType = m.GetParameters()[0].ParameterType;
                     if (paramType.IsArray)
                     {
                         var elemType = paramType.GetElementType();
@@ -1058,7 +1057,16 @@ namespace Robust.Shared.Serialization
                             return null;
                         }
 
-                        return ctor.Invoke(new object[]
+                        if (m is ConstructorInfo ctor)
+                        {
+                            return ctor.Invoke(new object[]
+                                {
+                                    array
+                                }
+                            );
+                        }
+
+                        return m.Invoke(null, new object[]
                             {
                                 array
                             }
@@ -1074,7 +1082,16 @@ namespace Robust.Shared.Serialization
                             return null;
                         }
 
-                        return ctor.Invoke(new object[]
+                        if (m is ConstructorInfo ctor)
+                        {
+                            return ctor.Invoke(new object[]
+                                {
+                                    array
+                                }
+                            );
+                        }
+
+                        return m.Invoke(null, new object[]
                             {
                                 array
                             }
@@ -1087,7 +1104,7 @@ namespace Robust.Shared.Serialization
                     var ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     var elemType = typedEnum.GenericTypeArguments[0];
                     var arrayType = elemType.MakeArrayType();
-                    ctor = ctors.FirstOrDefault(c =>
+                    var ctor = ctors.FirstOrDefault(c =>
                     {
                         var ps = c.GetParameters();
                         return ps.Length == 1 && ps[0].ParameterType == typedEnum;
@@ -1096,65 +1113,108 @@ namespace Robust.Shared.Serialization
                     // ReSharper disable once ConditionIsAlwaysTrueOrFalse
                     if (ctor != null)
                     {
-                        _ctorCache[type] = ctor;
+                        _factoryCache[type] = ctor;
                         //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                        var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
-                        if (array != null)
+                        var a = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
+                        if (a == null)
                         {
-                            return ctor.Invoke(new object[]
-                                {
-                                    array
-                                }
-                            );
+                            return null;
                         }
 
-                        return null;
+                        return ctor.Invoke(new object[] {a});
                     }
 
                     ctor = ctors.FirstOrDefault(c =>
                     {
                         var ps = c.GetParameters();
-                        return ps.Length == 1 && (ps[0].ParameterType == arrayType
-                            );
+                        return ps.Length == 1 && (ps[0].ParameterType == arrayType);
                     });
 
                     // ReSharper disable once InvertIf
                     if (ctor != null)
                     {
                         //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                        _ctorCache[type] = ctor;
-                        var array = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
-                        if (array == null)
+                        _factoryCache[type] = ctor;
+                        var a = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
+                        if (a == null)
                         {
                             return null;
                         }
 
-                        return ctor.Invoke(new object[]
-                            {
-                                array
-                            }
-                        );
+                        return ctor.Invoke(new object[] {a});
                     }
 
-                    throw new NotSupportedException($"{type.FullName}");
+                    var factories = type
+                        .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                        .Where(mi => mi.ReturnType == type)
+                        .Where(mi => mi.Name == "op_Implicit"
+                            || mi.Name == "op_Explicit"
+                            || mi.Name == "Create");
+
+                    var factory = factories.FirstOrDefault(c =>
+                    {
+                        var ps = c.GetParameters();
+                        return ps.Length == 1 && (ps[0].ParameterType == typedEnum || ps[0].ParameterType == arrayType);
+                    });
+
+                    // ReSharper disable once ConditionIsAlwaysTrueOrFalse
+                    if (factory != null)
+                    {
+                        _factoryCache[type] = factory;
+                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                        var a = MakeGenericArray(ReadGenericEnumerable(elemType, stream, backRefs, out var len), elemType, len);
+                        if (a == null)
+                        {
+                            return null;
+                        }
+
+                        return factory.Invoke(null, new object[] {a});
+                    }
+
+                    throw new NotSupportedException($"{type.FullName} needs a constructor taking an array or enumerable.");
                 }
             }
             else
             {
-                if (_ctorCache.TryGetValue(type, out var ctor))
+                if (_factoryCache.TryGetValue(type, out var m))
                 {
-                    var paramType = ctor.GetParameters()[0].ParameterType;
+                    var paramType = m.GetParameters()[0].ParameterType;
                     if (paramType.IsArray)
                     {
-                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                        return ctor.Invoke(new object[]
-                            {
-                                MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len)
-                            }
-                        );
+                        var a = MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len);
+
+                        if (m is ConstructorInfo ctor)
+                        {
+                            return ctor.Invoke(new object[] {a});
+                        }
+
+                        return m.Invoke(null, new object[] {a});
                     }
                     else
                     {
+                        var a = MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len);
+                        if (m is ConstructorInfo ctor)
+                        {
+                            return ctor.Invoke(new object[] {a});
+                        }
+
+                        return m.Invoke(null, new object[] {a});
+                    }
+                }
+
+                {
+                    var ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    var untypedEnum = typeof(IEnumerable);
+
+                    var ctor = ctors.FirstOrDefault(c =>
+                    {
+                        var ps = c.GetParameters();
+                        return ps.Length == 1 && ps[0].ParameterType == untypedEnum;
+                    });
+
+                    if (ctor != null)
+                    {
+                        _factoryCache[type] = ctor;
                         //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
                         return ctor.Invoke(new object[]
                             {
@@ -1162,49 +1222,53 @@ namespace Robust.Shared.Serialization
                             }
                         );
                     }
-                }
 
-                var ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var untypedEnum = typeof(IEnumerable);
+                    ctor = ctors.FirstOrDefault(c =>
+                    {
+                        var ps = c.GetParameters();
+                        return ps.Length == 1 && ps[0].ParameterType.IsArray && ps[0].ParameterType == typeof(object[]);
+                    });
 
-                ctor = ctors.FirstOrDefault(c =>
-                {
-                    var ps = c.GetParameters();
-                    return ps.Length == 1 && ps[0].ParameterType == untypedEnum;
-                });
+                    if (ctor != null)
+                    {
+                        _factoryCache[type] = ctor;
+                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                        return ctor.Invoke(new object[]
+                            {
+                                MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len)
+                            }
+                        );
+                    }
 
-                if (ctor != null)
-                {
-                    _ctorCache[type] = ctor;
-                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                    return ctor.Invoke(new object[]
+                    var factories = type
+                        .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                        .Where(mi => mi.ReturnType == type)
+                        .Where(mi => mi.Name == "op_Implicit"
+                            || mi.Name == "op_Explicit"
+                            || mi.Name == "Create");
+
+                    var factory = factories.FirstOrDefault(c =>
+                    {
+                        var ps = c.GetParameters();
+                        return ps.Length == 1 && ps[0].ParameterType == untypedEnum;
+                    });
+
+                    if (factory != null)
+                    {
+                        _factoryCache[type] = factory;
+                        //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
+                        var a = MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len);
+                        if (a == null)
                         {
-                            MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len)
+                            return null;
                         }
-                    );
+
+                        return factory.Invoke(null, new object[] {a});
+                    }
+
+                    throw new NotSupportedException($"{type.FullName} needs a constructor taking an array or enumerable.");
                 }
-
-                ctor = ctors.FirstOrDefault(c =>
-                {
-                    var ps = c.GetParameters();
-                    return ps.Length == 1 && ps[0].ParameterType.IsArray && ps[0].ParameterType == typeof(object[]);
-                });
-
-                if (ctor != null)
-                {
-                    _ctorCache[type] = ctor;
-                    //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
-                    return ctor.Invoke(new object[]
-                        {
-                            MakeGenericArray(ReadNonGenericEnumerable(stream, backRefs, out var len), typeof(object), len)
-                        }
-                    );
-                }
-
-                throw new NotSupportedException($"{type.FullName}");
             }
-
-            throw new NotImplementedException();
         }
 
         // ReSharper disable once ConvertNullableToShortForm
@@ -1355,10 +1419,10 @@ namespace Robust.Shared.Serialization
         }
 
         [NotNull, ContractAnnotation("item: null => halt")]
-        private static T NotNull<T>([CanBeNull] T item)=>item ?? throw new NotImplementedException();
+        private static T NotNull<T>([CanBeNull] T item) => item ?? throw new NotImplementedException();
 
         [NotNull]
-        private static TNotNull NotNullCast<TNotNull,TNullable>([CanBeNull] TNullable item) where TNotNull : TNullable => (TNotNull)item ?? throw new NotImplementedException();
+        private static TNotNull NotNullCast<TNotNull, TNullable>([CanBeNull] TNullable item) where TNotNull : TNullable => (TNotNull) item ?? throw new NotImplementedException();
 
     }
 
