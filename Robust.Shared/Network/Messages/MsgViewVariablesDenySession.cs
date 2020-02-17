@@ -27,13 +27,13 @@ namespace Robust.Shared.Network.Messages
         /// </summary>
         public DenyReason Reason { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
+        public override void ReadFromBuffer(NetIncomingMessage buffer)
         {
             RequestId = buffer.ReadUInt32();
             Reason = (DenyReason)buffer.ReadUInt16();
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer)
         {
             buffer.Write(RequestId);
             buffer.Write((ushort)Reason);

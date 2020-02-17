@@ -11,12 +11,13 @@ using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Text;
 using System.Threading;
+using JetBrains.Annotations;
 using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
 using Robust.Shared.Serialization;
 
-[module: IoCRegister(typeof(IRobustSerializer), typeof(BwoinkSerializer))]
+// ReSharper disable HeuristicUnreachableCode // TODO: figure out why null-returning FirstOrDefault is evaluated as non-nullable
 
 namespace Robust.Shared.Serialization
 {
@@ -162,7 +163,8 @@ namespace Robust.Shared.Serialization
             return props;
         }
 
-        private static IEnumerable<object> GetObjects(IEnumerable items)
+        [NotNull, ItemCanBeNull]
+        private static IEnumerable<object> GetObjects([NotNull] IEnumerable items)
         {
             foreach (var item in items)
             {
@@ -170,7 +172,7 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        internal void WriteNonGenericEnumerable(Stream stream, IEnumerable items, List<object> backRefs)
+        internal void WriteNonGenericEnumerable(Stream stream, [CanBeNull,ItemCanBeNull] IEnumerable items, List<object> backRefs)
         {
             if (items == null)
             {
@@ -186,6 +188,7 @@ namespace Robust.Shared.Serialization
             }
         }
 
+        [CanBeNull,ItemCanBeNull]
         internal IEnumerable ReadNonGenericEnumerable(Stream stream, List<object> backRefs, out int len)
         {
             var buf = new byte[4];
@@ -206,6 +209,7 @@ namespace Robust.Shared.Serialization
             return ReadNonGenericEnumerableInternal(stream, backRefs, len);
         }
 
+        [CanBeNull,ItemCanBeNull]
         internal IEnumerable ReadNonGenericEnumerableInternal(Stream stream, List<object> backRefs, int len)
         {
             for (var i = 0; i < len; ++i)
@@ -214,8 +218,14 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        internal void WriteGenericEnumerable(Stream stream, Type itemType, IEnumerable items, List<object> backRefs, bool skipElemTypeInfo = true)
+        internal void WriteGenericEnumerable(Stream stream, [CanBeNull] Type itemType,
+            [CanBeNull,ItemCanBeNull] IEnumerable items, List<object> backRefs, bool skipElemTypeInfo = true)
         {
+            if (itemType == null)
+            {
+                throw new NotImplementedException();
+            }
+
             if (items == null)
             {
                 stream.Write(BitConverter.GetBytes(0));
@@ -377,6 +387,7 @@ namespace Robust.Shared.Serialization
             return 0;
         }
 
+        [CanBeNull,ItemCanBeNull]
         internal static IEnumerable<T> ReadGenericEnumerableGeneric<T>(BwoinkSerializer szr, Stream stream, List<object> backRefs, StrongBox<int> lengthBox)
         {
             var buf = new byte[4];
@@ -399,6 +410,8 @@ namespace Robust.Shared.Serialization
             return ReadGenericEnumerableGenericInternal<T>(szr, stream, backRefs, len);
         }
 
+
+        [CanBeNull,ItemCanBeNull]
         internal static IEnumerable<T> ReadGenericEnumerableGenericInternal<T>(BwoinkSerializer szr, Stream stream, List<object> backRefs, int len)
         {
             var type = typeof(T);
@@ -407,7 +420,9 @@ namespace Robust.Shared.Serialization
             {
                 for (var i = 0; i < len; ++i)
                 {
+#pragma warning disable 8601
                     yield return (T) szr.Read(stream, type, backRefs);
+#pragma warning restore 8601
                 }
             }
             else
@@ -422,29 +437,37 @@ namespace Robust.Shared.Serialization
 
                     if (idx == 0)
                     {
+#pragma warning disable 8601, 8653
                         yield return default;
+#pragma warning restore 8601, 8653
                     }
                     else
                     {
                         if (idx == 1)
                         {
+#pragma warning disable 8601
                             yield return (T) szr.Read(stream, type, backRefs);
+#pragma warning restore 8601
                         }
                         else
                         {
                             var inheritor = inheritorTypes[idx - 2];
+#pragma warning disable 8601
                             yield return (T) szr.Read(stream, inheritor, backRefs);
+#pragma warning restore 8601
                         }
                     }
                 }
             }
         }
 
+        [ItemCanBeNull]
         private delegate IEnumerable ReadGenericEnumerableDelegate(BwoinkSerializer szr, Stream stream, List<object> backRefs, StrongBox<int> lengthBox);
 
         private IDictionary<Type, ReadGenericEnumerableDelegate> _readGenericEnumerableDelegateCache =
             new Dictionary<Type, ReadGenericEnumerableDelegate>();
 
+        [ItemCanBeNull]
         internal IEnumerable ReadGenericEnumerable(Type type, Stream stream, List<object> backRefs, out int len)
         {
             if (!_readGenericEnumerableDelegateCache.TryGetValue(type, out var dlg))
@@ -463,12 +486,16 @@ namespace Robust.Shared.Serialization
         private Dictionary<Type, (MethodInfo Value, MethodInfo HasValue)> _nullableGetters =
             new Dictionary<Type, (MethodInfo, MethodInfo)>();
 
-        internal void Write(Stream stream, Type type, object obj, List<object> backRefs)
+        internal void Write(Stream stream, [CanBeNull] Type type, [CanBeNull] object obj, List<object> backRefs)
         {
-            TraceWriteLine($"Writing {type.Name}");
+            TraceWriteLine($"Writing {type?.Name ?? "null"}");
             TraceIndent();
             try
             {
+                if (type == null)
+                {
+                    throw new NotImplementedException();
+                }
 #if DEBUG
                 if (obj != null)
                 {
@@ -496,7 +523,7 @@ namespace Robust.Shared.Serialization
                         var elemType = type.GetElementType();
                         if (elemType != typeof(object))
                         {
-                            WriteGenericEnumerable(stream, type.GetElementType(), (IEnumerable) obj, backRefs);
+                            WriteGenericEnumerable(stream, elemType, (IEnumerable) obj, backRefs);
                             return;
                         }
                     }
@@ -506,7 +533,7 @@ namespace Robust.Shared.Serialization
                 }
                 else if (type.IsPrimitive)
                 {
-                    var bytes = (byte[]) BitConverter.GetBytes((dynamic) obj);
+                    var bytes = (byte[]) BitConverter.GetBytes((dynamic) NotNull(obj));
                     stream.Write(bytes);
                     return;
                 }
@@ -566,16 +593,18 @@ namespace Robust.Shared.Serialization
                             {
                                 var valType = value.GetType();
                                 ft = valType;
-                            }
 
-                            if (!backRefs.Contains(value))
-                            {
-                                backRefs.Add(value);
+                                if (!backRefs.Contains(value))
+                                {
+                                    backRefs.Add(value);
+                                }
                             }
                         }
                         else if (ft.IsPrimitive)
                         {
+#pragma warning disable 8600
                             var bytes = (byte[]) BitConverter.GetBytes((dynamic) value);
+#pragma warning restore 8600
                             stream.Write(bytes);
                             continue;
                         }
@@ -653,12 +682,14 @@ namespace Robust.Shared.Serialization
             }
         }
 
-        private void WriteEnumerable(Stream stream, Type type, object obj, List<object> backRefs)
+        private void WriteEnumerable(Stream stream, Type type, [CanBeNull] object obj, List<object> backRefs)
         {
             var typedEnum = type.GetInterfaces()
                 .FirstOrDefault(intf => intf.IsConstructedGenericType
                     && intf.Namespace == "System.Collections.Generic" && intf.Name.StartsWith("IEnumerable`1")
                     && intf.GetGenericTypeDefinition().Name == "IEnumerable`1");
+
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalse
             if (typedEnum != null)
             {
                 WriteGenericEnumerable(stream, typedEnum.GenericTypeArguments[0], (IEnumerable) obj, backRefs);
@@ -671,7 +702,7 @@ namespace Robust.Shared.Serialization
             return;
         }
 
-        private void WriteNullable(Stream stream, Type type, object obj, List<object> backRefs)
+        private void WriteNullable(Stream stream, Type type, [CanBeNull] object obj, List<object> backRefs)
         {
             var underType = type.GetGenericArguments()[0];
 
@@ -682,15 +713,15 @@ namespace Robust.Shared.Serialization
             }
             else
             {
-                var valueProp = type.GetProperty("Value");
-                // ReSharper disable once PossibleNullReferenceException
-                valueGetter = valueProp.GetMethod;
-                // ReSharper disable once PossibleNullReferenceException
-                hasValueGetter = type.GetProperty("HasValue").GetMethod;
+                var valueProp = NotNull(type.GetProperty("Value"));
+                valueGetter = NotNull(valueProp.GetMethod);
+                var hasValueProp = NotNull(type.GetProperty("HasValue"));
+                hasValueGetter = NotNull(hasValueProp.GetMethod);
                 _nullableGetters[type] = (valueGetter, hasValueGetter);
             }
 
-            var hasValue = obj != null && (bool) hasValueGetter.Invoke(obj, null);
+            var hasValue = obj != null
+                && (bool) (hasValueGetter.Invoke(obj, null) ?? false);
 
             if (hasValue)
             {
@@ -717,15 +748,19 @@ namespace Robust.Shared.Serialization
         private static Dictionary<Type, CreateValueTypeDelegate> _createValueTypeDelegateCache =
             new Dictionary<Type, CreateValueTypeDelegate>();
 
+        [NotNull]
         internal static TDelegate CreateDelegate<TDelegate>(Type type, BindingFlags bindingFlags, string name, params Type[] genTypes) where TDelegate : Delegate =>
-            (TDelegate) type
+            NotNullCast<TDelegate,Delegate>(type
                 .GetMethod(name, bindingFlags)
                 ?.MakeGenericMethod(genTypes)
-                .CreateDelegate(typeof(TDelegate));
+                .CreateDelegate(typeof(TDelegate))
+            );
 
+        [NotNull]
         internal static TDelegate CreateDelegate<TDelegate, TSource>(BindingFlags bindingFlags, string name, params Type[] genTypes) where TDelegate : Delegate =>
             CreateDelegate<TDelegate>(typeof(TSource), bindingFlags, name, genTypes);
 
+        [NotNull]
         internal static object CreateValueType(Type type, byte[] bytes)
         {
             if (!_createValueTypeDelegateCache.TryGetValue(type, out var dlg))
@@ -740,53 +775,24 @@ namespace Robust.Shared.Serialization
             return dlg(bytes);
         }
 
-        internal Array MakeGenericArray(IEnumerable objects, Type itemType, int size)
-        {
-            if (objects == null)
-            {
-                return null;
-            }
-
-            if (size < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(size));
-            }
-
-            var array = Array.CreateInstance(itemType, size);
-
-            if (size == 0)
-            {
-                return array;
-            }
-
-            var e = objects.GetEnumerator();
-
-            for (var i = 0; i < size; i++)
-            {
-                if (!e.MoveNext())
-                {
-                    throw new NotImplementedException("Mismatched length and enumeration.");
-                }
-
-                array.SetValue(e.Current, i);
-            }
-
-            return array;
-        }
-
-        private static Dictionary<Type, ConstructorInfo> _ctorCache =
-            new Dictionary<Type, ConstructorInfo>();
+        private static Dictionary<Type, ConstructorInfo> _ctorCache = new Dictionary<Type, ConstructorInfo>();
 
         private static readonly Comparer<FieldInfo> FieldComparer = Comparer<FieldInfo>.Create((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
 
         private static readonly Comparer<PropertyInfo> PropertyComparer = Comparer<PropertyInfo>.Create((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
 
-        internal object Read(Stream stream, Type type, List<object> backRefs)
+        [CanBeNull]
+        internal object Read(Stream stream, [CanBeNull] Type type, List<object> backRefs)
         {
             TraceWriteLine($"Reading {type?.Name ?? "null"}");
             TraceIndent();
             try
             {
+                if (type == null)
+                {
+                    throw new NotImplementedException();
+                }
+
                 if (type.IsConstructedGenericType)
                 {
                     var gtd = type.GetGenericTypeDefinition();
@@ -1029,12 +1035,14 @@ namespace Robust.Shared.Serialization
             }
         }
 
+        [CanBeNull]
         private object ReadEnumerable(Stream stream, Type type, List<object> backRefs)
         {
             var typedEnum = type.GetInterfaces()
                 .FirstOrDefault(t => t.IsConstructedGenericType
                     && t.Namespace == "System.Collections.Generic" && t.Name.StartsWith("IEnumerable`1")
                     && t.GetGenericTypeDefinition().Name == "IEnumerable`1");
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalse
             if (typedEnum != null)
             {
                 if (_ctorCache.TryGetValue(type, out var ctor))
@@ -1085,6 +1093,7 @@ namespace Robust.Shared.Serialization
                         return ps.Length == 1 && ps[0].ParameterType == typedEnum;
                     });
 
+                    // ReSharper disable once ConditionIsAlwaysTrueOrFalse
                     if (ctor != null)
                     {
                         _ctorCache[type] = ctor;
@@ -1109,6 +1118,7 @@ namespace Robust.Shared.Serialization
                             );
                     });
 
+                    // ReSharper disable once InvertIf
                     if (ctor != null)
                     {
                         //field.SetValueDirect(typedRef, ctor.Invoke(new object[]
@@ -1262,10 +1272,9 @@ namespace Robust.Shared.Serialization
             WriteTypeInfo(stream, type);
 
             Write(stream, type, obj, backRefs);
-
         }
 
-        internal void SerializeGeneric<T>(Stream stream, T obj, List<object> backRefs) =>
+        internal void SerializeGeneric<T>(Stream stream, [CanBeNull] T obj, List<object> backRefs) =>
             Serialize(stream, (object) obj, backRefs);
 
         internal static IEnumerable<Type> FindImplementingTypes(Type intf)
@@ -1344,6 +1353,12 @@ namespace Robust.Shared.Serialization
 
             return obj;
         }
+
+        [NotNull, ContractAnnotation("item: null => halt")]
+        private static T NotNull<T>([CanBeNull] T item)=>item ?? throw new NotImplementedException();
+
+        [NotNull]
+        private static TNotNull NotNullCast<TNotNull,TNullable>([CanBeNull] TNullable item) where TNotNull : TNullable => (TNotNull)item ?? throw new NotImplementedException();
 
     }
 

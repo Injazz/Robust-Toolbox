@@ -19,7 +19,9 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Reflection;
 using System.Text;
@@ -144,6 +146,54 @@ namespace Lidgren.Network
 			EnsureBufferSize(m_bitLength + bits);
 			NetBitWriter.WriteBytes(source, 0, source.Length, m_data, m_bitLength);
 			m_bitLength += bits;
+		}
+
+		/// <summary>
+		/// Writes all bytes in a stream
+		/// </summary>
+		public void Write(Stream source)
+		{
+			if (source == null)
+				throw new ArgumentNullException("source");
+			if (source.CanSeek)
+			{
+				var bits = checked((int) source.Length * 8 );
+				EnsureBufferSize(m_bitLength + bits);
+				if (source is MemoryStream ms)
+				{
+					if (ms.TryGetBuffer(out var seg))
+					{
+						NetBitWriter.WriteBytes(seg.Array, seg.Offset, seg.Count, m_data, m_bitLength);
+					
+						m_bitLength += bits;
+						return;
+					}
+				}
+
+				var buf = ArrayPool<byte>.Shared.Rent(Math.Min((int) (source.Length - source.Position), 4096));
+				for (;;)
+				{
+					var read = source.Read(buf, 0, buf.Length);
+					if (read == 0) break;
+
+					NetBitWriter.WriteBytes(buf, 0, read, m_data, m_bitLength);
+				}
+				
+				m_bitLength += bits;
+			}
+			else
+			{
+				var buf = ArrayPool<byte>.Shared.Rent(4096);
+				for (;;)
+				{
+					var read = source.Read(buf, 0, buf.Length);
+					if (read == 0) break;
+
+					NetBitWriter.WriteBytes(buf, 0, read, m_data, m_bitLength);
+					
+					m_bitLength += read * 8;
+				}
+			}
 		}
 
 		/// <summary>

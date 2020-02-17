@@ -6,8 +6,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Robust.Shared.Network;
 
-//[module: IoCRegister(typeof(IRobustSerializer), typeof(Robust.Shared.Serialization.NetSerializer))]
+[module: IoCRegister(typeof(IRobustSerializer), typeof(Robust.Shared.Serialization.NetSerializer))]
 
 
 namespace Robust.Shared.Serialization
@@ -25,23 +26,70 @@ namespace Robust.Shared.Serialization
         private HashSet<Type> SerializableTypes;
 
 #region Statistics
-        public static long LargestObjectSerializedBytes { get; private set; }
-        public static Type LargestObjectSerializedType { get; private set; }
+        public static long TotalObjectsSerialized { get; private set; }
 
-        public static long BytesSerialized { get; private set; }
+        public static long TotalObjectsDeserialized { get; private set; }
 
-        public static long ObjectsSerialized { get; private set; }
+        public static long TotalBytesWritten { get; private set; }
 
-        public static long LargestObjectDeserializedBytes { get; private set; }
-        public static Type LargestObjectDeserializedType { get; private set; }
+        public static long TotalBytesRead { get; private set; }
 
-        public static long BytesDeserialized { get; private set; }
+        public long ObjectsSerialized
+        {
+            get => _objectsSerialized;
+            private set
+            {
+                TotalObjectsSerialized += (value - _objectsSerialized);
+                _objectsSerialized = value;
+            }
+        }
 
-        public static long ObjectsDeserialized { get; private set; }
+        public long ObjectsDeserialized
+        {
+            get => _objectsDeserialized;
+            private set
+            {
+                TotalObjectsDeserialized += (value - _objectsDeserialized);
+                _objectsDeserialized = value;
+            }
+        }
+
+        public long BytesWritten
+        {
+            get => _bytesWritten;
+            private set
+            {
+                TotalBytesWritten += (value - _bytesWritten);
+                _bytesWritten = value;
+            }
+        }
+
+        public long BytesRead
+        {
+            get => _bytesRead;
+            private set
+            {
+                TotalBytesRead += (value - _bytesRead);
+                _bytesRead = value;
+            }
+        }
+
+        private long _bytesWritten;
+
+        private long _bytesRead;
+
+        private long _objectsSerialized;
+
+        private long _objectsDeserialized;
 #endregion
 
         public void Initialize()
         {
+            _bytesWritten = 0;
+            _bytesRead = 0;
+            _objectsSerialized = 0;
+            _objectsDeserialized = 0;
+
             var types = reflectionManager.FindTypesWithAttribute<NetSerializableAttribute>().ToList();
 #if DEBUG
             foreach (var type in types)
@@ -60,18 +108,10 @@ namespace Robust.Shared.Serialization
 
         public void Serialize(Stream stream, object toSerialize)
         {
-            var start = stream.Position;
+            var writeStatsStream = new StatisticsGatheringStreamWrapper(stream);
             Serializer.Serialize(stream, toSerialize);
-            var end = stream.Position;
-            var byteCount = end - start;
-            BytesSerialized += byteCount;
+            BytesWritten += writeStatsStream.BytesWritten;
             ++ObjectsSerialized;
-
-            if (byteCount > LargestObjectSerializedBytes)
-            {
-                LargestObjectSerializedBytes = byteCount;
-                LargestObjectSerializedType = toSerialize.GetType();
-            }
         }
 
         public void Serialize<T>(Stream stream, T obj)
@@ -84,19 +124,11 @@ namespace Robust.Shared.Serialization
 
         public object Deserialize(Stream stream)
         {
-            var start = stream.Position;
+            var readStatsStream = new StatisticsGatheringStreamWrapper(stream);
             var result = Serializer.Deserialize(stream);
-            var end = stream.Position;
-            var byteCount = end - start;
-            BytesDeserialized += byteCount;
+            BytesRead += readStatsStream.BytesWritten;
+            TotalBytesRead += readStatsStream.BytesWritten;
             ++ObjectsDeserialized;
-
-            if (byteCount > LargestObjectDeserializedBytes)
-            {
-                LargestObjectDeserializedBytes = byteCount;
-                LargestObjectDeserializedType = result.GetType();
-            }
-
             return result;
         }
 

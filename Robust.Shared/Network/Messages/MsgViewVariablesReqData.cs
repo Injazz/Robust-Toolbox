@@ -39,13 +39,12 @@ namespace Robust.Shared.Network.Messages
         /// </summary>
         public ViewVariablesRequest RequestMeta { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
+        public override void ReadFromBuffer(NetIncomingMessage buffer)
         {
             RequestId = buffer.ReadUInt32();
             SessionId = buffer.ReadUInt32();
+            var length = buffer.ReadVariableInt32();
             var serializer = IoCManager.Resolve<IRobustSerializer>();
-            serializer.UseCompression = isCompressed;
-            var length = buffer.ReadInt32();
             var bytes = buffer.ReadBytes(length);
             using (var stream = new MemoryStream(bytes))
             {
@@ -53,16 +52,15 @@ namespace Robust.Shared.Network.Messages
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer)
         {
             buffer.Write(RequestId);
             buffer.Write(SessionId);
             var serializer = IoCManager.Resolve<IRobustSerializer>();
-            serializer.UseCompression = useCompression;
             using (var stream = new MemoryStream())
             {
                 serializer.Serialize(stream, RequestMeta);
-                buffer.Write((int)stream.Length);
+                buffer.WriteVariableInt32((int)stream.Length);
                 buffer.Write(stream.ToArray());
             }
         }

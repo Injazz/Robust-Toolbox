@@ -1,31 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Joveler.Compression.XZ;
 using Lidgren.Network;
-using Robust.Shared.Asynchronous;
 using Robust.Shared.Configuration;
 using Robust.Shared.Interfaces.Configuration;
-using Robust.Shared.Interfaces.Log;
 using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Timing;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
-using Robust.Shared.Timing;
 using Robust.Shared.Utility;
-using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace Robust.Shared.Network
 {
@@ -1002,7 +994,7 @@ namespace Robust.Shared.Network
 
             try
             {
-                instance.ReadFromBuffer(msg, true);
+                instance.ReadFromBuffer(msg);
             }
             catch (InvalidCastException ice)
             {
@@ -1104,7 +1096,7 @@ namespace Robust.Shared.Network
             _blankNetMsgFunctions.Add(type, @delegate);
         }
 
-        private NetOutgoingMessage BuildMessage(NetMessage message, NetPeer peer, bool useCompression = false)
+        private NetOutgoingMessage BuildMessage(NetMessage message, NetPeer peer)
         {
             var packet = peer.CreateMessage(4);
 
@@ -1113,7 +1105,7 @@ namespace Robust.Shared.Network
                     $"[NET] No string in table with name {message.MsgName}. Was it registered?");
 
             packet.Write((byte) msgId);
-            message.WriteToBuffer(packet, useCompression);
+            message.WriteToBuffer(packet);
             return packet;
         }
 
@@ -1145,7 +1137,7 @@ namespace Robust.Shared.Network
             var connection = channel.Connection;
             var peer = connection.Peer;
 
-            var packet = BuildMessage(message, peer, true);
+            var packet = BuildMessage(message, peer);
 
             var packetSize = packet.LengthBytes;
             DebugTools.Assert(packetSize > 0);
@@ -1208,7 +1200,7 @@ namespace Robust.Shared.Network
             DebugTools.Assert(_netPeers[0].ConnectionsCount == 1);
 
             var peer = _netPeers[0];
-            var packet = BuildMessage(message, peer, true);
+            var packet = BuildMessage(message, peer);
             var method = message.DeliveryMethod;
             peer.SendMessage(packet, peer.Connections[0], method);
         }

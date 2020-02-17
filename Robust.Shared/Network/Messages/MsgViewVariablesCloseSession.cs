@@ -21,12 +21,12 @@ namespace Robust.Shared.Network.Messages
         /// </summary>
         public uint SessionId { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
+        public override void ReadFromBuffer(NetIncomingMessage buffer)
         {
             SessionId = buffer.ReadUInt32();
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer)
         {
             buffer.Write(SessionId);
         }

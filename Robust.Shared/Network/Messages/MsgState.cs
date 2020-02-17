@@ -6,11 +6,12 @@ using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
 using System.IO;
+using Joveler.Compression.XZ;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Network.Messages
 {
-    public class MsgState : NetMessage
+    public class MsgState : NetMessageCompressed
     {
         // If a state is large enough we send it ReliableUnordered instead.
         // This is to avoid states being so large that they consistently fail to reach the other end
@@ -32,32 +33,18 @@ namespace Robust.Shared.Network.Messages
 
         private bool _hasWritten;
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
+        public override void ReadFromBuffer(NetIncomingMessage buffer)
         {
             MsgSize = buffer.LengthBytes;
-            var length = buffer.ReadVariableInt32();
-            var stateData = buffer.ReadBytes(length);
-            using (var stateStream = new MemoryStream(stateData))
-            {
-                var serializer = IoCManager.Resolve<IRobustSerializer>();
-                serializer.UseCompression = isCompressed;
-                State = serializer.Deserialize<GameState>(stateStream);
-            }
+
+            State = DeserializeFromBuffer<GameState>(buffer, out var length);
 
             State.PayloadSize = length;
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer)
         {
-            var serializer = IoCManager.Resolve<IRobustSerializer>();
-            serializer.UseCompression = useCompression;
-            using (var stateStream = new MemoryStream())
-            {
-                DebugTools.Assert(stateStream.Length <= Int32.MaxValue);
-                serializer.Serialize(stateStream, State);
-                buffer.WriteVariableInt32((int)stateStream.Length);
-                buffer.Write(stateStream.ToArray());
-            }
+            SerializeToBuffer(buffer, State);
 
             _hasWritten = false;
             MsgSize = buffer.LengthBytes;

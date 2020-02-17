@@ -11,11 +11,11 @@ namespace Robust.Shared.Network.Messages
         public MsgPlayerListReq(INetChannel channel) : base(NAME, GROUP) { }
         #endregion
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
+        public override void ReadFromBuffer(NetIncomingMessage buffer)
         {
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer)
         {
         }
     }

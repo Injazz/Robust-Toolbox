@@ -34,13 +34,12 @@ namespace Robust.Shared.Network.Messages
         /// </summary>
         public object Value { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
+        public override void ReadFromBuffer(NetIncomingMessage buffer)
         {
-            var serializer = IoCManager.Resolve<IRobustSerializer>();
-            serializer.UseCompression = isCompressed;
             SessionId = buffer.ReadUInt32();
+            var length = buffer.ReadVariableInt32();
+            var serializer = IoCManager.Resolve<IRobustSerializer>();
             {
-                var length = buffer.ReadInt32();
                 var bytes = buffer.ReadBytes(length);
                 using (var stream = new MemoryStream(bytes))
                 {
@@ -48,7 +47,6 @@ namespace Robust.Shared.Network.Messages
                 }
             }
             {
-                var length = buffer.ReadInt32();
                 var bytes = buffer.ReadBytes(length);
                 using (var stream = new MemoryStream(bytes))
                 {
@@ -57,21 +55,20 @@ namespace Robust.Shared.Network.Messages
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer)
         {
             var serializer = IoCManager.Resolve<IRobustSerializer>();
-            serializer.UseCompression = useCompression;
             buffer.Write(SessionId);
             using (var stream = new MemoryStream())
             {
                 serializer.Serialize(stream, PropertyIndex);
-                buffer.Write((int)stream.Length);
+                buffer.WriteVariableInt32((int)stream.Length);
                 buffer.Write(stream.ToArray());
             }
             using (var stream = new MemoryStream())
             {
                 serializer.Serialize(stream, Value);
-                buffer.Write((int)stream.Length);
+                buffer.WriteVariableInt32((int)stream.Length);
                 buffer.Write(stream.ToArray());
             }
         }

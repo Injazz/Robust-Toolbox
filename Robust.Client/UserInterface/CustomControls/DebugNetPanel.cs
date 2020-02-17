@@ -6,28 +6,35 @@ using Robust.Client.UserInterface.Controls;
 using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Timing;
 using Robust.Shared.Maths;
+using Robust.Shared.Network.Messages;
 using Robust.Shared.Timing;
 using Robust.Shared.Utility;
 
 namespace Robust.Client.UserInterface.CustomControls
 {
+
     public class DebugNetPanel : PanelContainer
     {
+
         // Float so I don't have to cast it to prevent integer division down below.
         const float ONE_KIBIBYTE = 1024;
 
         private readonly IClientNetManager NetManager;
+
         private readonly IGameTiming GameTiming;
 
         private TimeSpan LastUpdate;
+
         private Label contents;
 
         // These are ints in the stats.
         // That's probably gonna get refactored at some point because > 2 GiB bandwidth usage isn't unreasonable, is it?
         private long LastSentBytes;
+
         private long LastReceivedBytes;
 
         private long LastSentPackets;
+
         private long LastReceivedPackets;
 
         public DebugNetPanel(IClientNetManager netMan, IGameTiming gameTiming)
@@ -118,7 +125,9 @@ namespace Robust.Client.UserInterface.CustomControls
 DOWN: {receivedBytes / ONE_KIBIBYTE:N} KiB/s, {receivedPackets} pckt/s, {LastReceivedBytes / ONE_KIBIBYTE:N} KiB, {LastReceivedPackets} pckt
 PING: {NetManager.ServerChannel?.Ping ?? -1} ms}}" /*
             + $" Back Channel {{ {tcpSentBytesCmp / ONE_KIBIBYTE:N} ({tcpSentBytes / ONE_KIBIBYTE:N}) KiB Sent, {tcpRecvBytesCmp / ONE_KIBIBYTE:N} ({tcpRecvBytes / ONE_KIBIBYTE:N}) KiB Recv }}"
-            */;
+            */
+                + $" Compression {{ Threshold: {NetMessageCompressed.CompressionThreshold} bytes }}"
+                ;
             MinimumSizeChanged();
         }
 
@@ -126,5 +135,7 @@ PING: {NetManager.ServerChannel?.Ping ?? -1} ms}}" /*
         {
             return new Vector2(contents.CombinedMinimumSize.X + 10, contents.CombinedMinimumSize.Y + 10);
         }
+
     }
+
 }

@@ -17,7 +17,7 @@ namespace Robust.Shared.GameStates
         public bool Extrapolated { get; set; }
 
         /// <summary>
-        ///     The serialized size in bytes of this game state.
+        ///     The network size in bytes of this game state.
         /// </summary>
         [field:NonSerialized]
         public int PayloadSize { get; set; }

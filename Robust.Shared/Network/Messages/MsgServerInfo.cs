@@ -16,7 +16,7 @@ namespace Robust.Shared.Network.Messages
         public byte TickRate { get; set; }
         public NetSessionId PlayerSessionId { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
+        public override void ReadFromBuffer(NetIncomingMessage buffer)
         {
             ServerName = buffer.ReadString();
             ServerMaxPlayers = buffer.ReadInt32();
@@ -24,7 +24,7 @@ namespace Robust.Shared.Network.Messages
             PlayerSessionId = new NetSessionId(buffer.ReadString());
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer)
         {
             buffer.Write(ServerName);
             buffer.Write(ServerMaxPlayers);

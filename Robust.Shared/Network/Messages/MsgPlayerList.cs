@@ -18,7 +18,7 @@ namespace Robust.Shared.Network.Messages
         public byte PlyCount { get; set; }
         public List<PlayerState> Plyrs { get; set; }
 
-        public override void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false)
+        public override void ReadFromBuffer(NetIncomingMessage buffer)
         {
             Plyrs = new List<PlayerState>();
             PlyCount = buffer.ReadByte();
@@ -35,7 +35,7 @@ namespace Robust.Shared.Network.Messages
             }
         }
 
-        public override void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false)
+        public override void WriteToBuffer(NetOutgoingMessage buffer)
         {
             buffer.Write(PlyCount);
 

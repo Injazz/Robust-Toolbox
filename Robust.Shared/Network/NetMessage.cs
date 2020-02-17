@@ -81,14 +81,14 @@ namespace Robust.Shared.Network
         /// </summary>
         /// <param name="buffer">The buffer of the raw incoming packet.</param>
         /// <param name="isCompressed">The content is compressed as a frame.</param>
-        public abstract void ReadFromBuffer(NetIncomingMessage buffer, bool isCompressed = false);
+        public abstract void ReadFromBuffer(NetIncomingMessage buffer);
 
         /// <summary>
         /// Serializes this NetMessage into a new NetOutgoingMessage.
         /// </summary>
         /// <param name="buffer">The buffer of the new packet being serialized.</param>
         /// <param name="useCompression">The content should be compressed as a frame.</param>
-        public abstract void WriteToBuffer(NetOutgoingMessage buffer, bool useCompression = false);
+        public abstract void WriteToBuffer(NetOutgoingMessage buffer);
 
         public virtual NetDeliveryMethod DeliveryMethod
         {

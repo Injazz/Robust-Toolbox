@@ -54,7 +54,7 @@ namespace Robust.Shared.Serialization
 
         public static int GetAssemblyCount() => _Assemblies.Count(a => a != null);
 
-        public static bool RegisterAssembly(Assembly asm)
+        public static bool RegisterAssembly([NotNull] Assembly asm)
         {
             if (_Assemblies.Contains(asm)) return false;
 
@@ -64,6 +64,7 @@ namespace Robust.Shared.Serialization
 
         public static IEnumerable<Assembly> GetAssemblies() => _Assemblies.Where(a => a != null);
 
+        [CanBeNull]
         public static Assembly GetAssembly(int asmIndex)
         {
             var index = asmIndex - 1;
@@ -75,7 +76,7 @@ namespace Robust.Shared.Serialization
             return _Assemblies[index];
         }
 
-        public static int? GetAssemblyIndex(Assembly asm)
+        public static int? GetAssemblyIndex([CanBeNull] Assembly asm)
         {
             if (asm == null)
             {
@@ -210,7 +211,8 @@ namespace Robust.Shared.Serialization
             Debug.WriteLine($"Building string dictionaries took {elapsed}ms");
         }
 
-        public static byte[] GetAssemblyStringsHash(Assembly asm)
+        [CanBeNull]
+        public static byte[] GetAssemblyStringsHash([CanBeNull] Assembly asm)
         {
             if (asm == null)
             {
@@ -401,6 +403,7 @@ namespace Robust.Shared.Serialization
             }
         }
 
+        [CanBeNull]
         public static Type ReadTypeInfo(Stream stream)
         {
             var buf = new byte[4];
@@ -451,6 +454,11 @@ namespace Robust.Shared.Serialization
                         throw new NotImplementedException();
                     }
 
+                    if (elemType == null)
+                    {
+                        throw new NotImplementedException();
+                    }
+
                     return rank == 1 ? elemType.MakeArrayType() : elemType.MakeArrayType(rank);
                 }
 
@@ -463,6 +471,11 @@ namespace Robust.Shared.Serialization
                 var rank = stream.ReadByte();
 
                 var elemType = ReadTypeInfo(stream);
+
+                if (elemType == null)
+                {
+                    throw new NotImplementedException();
+                }
 
                 var arrayType = rank == 1 ? elemType.MakeArrayType() : elemType.MakeArrayType(rank);
 
@@ -484,6 +497,12 @@ namespace Robust.Shared.Serialization
             foreach (var _ in type.GetGenericArguments())
             {
                 var resolved = ReadTypeInfo(stream);
+
+                if (resolved == null)
+                {
+                    throw new NotImplementedException();
+                }
+
                 if (resolved.IsGenericTypeDefinition)
                 {
                     var moreTypeArgs = ReadGenericTypeInfo(stream, resolved);
