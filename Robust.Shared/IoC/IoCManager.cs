@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Threading;
 using System.Threading.Tasks;
+using Robust.Shared.ContentPack;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.IoC
@@ -212,7 +213,7 @@ namespace Robust.Shared.IoC
             }
             catch (Exception)
             {
-                var filePath = Path.Combine(Environment.CurrentDirectory, assembly + ".dll");
+                var filePath = Path.Combine(PathHelpers.GetExecutableDirectory(), assembly + ".dll");
                 asm = Assembly.LoadFrom(filePath);
             }
 
