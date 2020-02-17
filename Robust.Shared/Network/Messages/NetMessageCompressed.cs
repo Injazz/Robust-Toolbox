@@ -1,7 +1,9 @@
 using System.IO;
+using System.Threading;
 using Joveler.Compression.XZ;
 using Lidgren.Network;
 using Robust.Shared.GameStates;
+using Robust.Shared.Interfaces.Configuration;
 using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
@@ -11,10 +13,24 @@ namespace Robust.Shared.Network.Messages
 
     public abstract class NetMessageCompressed : NetMessage
     {
+
+        private static readonly ThreadLocal<IConfigurationManager> LazyConfig
+            = new ThreadLocal<IConfigurationManager>(IoCManager.Resolve<IConfigurationManager>);
+
+        private static IConfigurationManager Config => LazyConfig.Value;
+
+        static NetMessageCompressed()
+        {
+            Config.RegisterCVar("net.compression", false);
+            Config.RegisterCVar("net.compressthresh", 32);
+        }
+
         // If a state is large enough we send it ReliableUnordered instead.
         // This is to avoid states being so large that they consistently fail to reach the other end
         // (due to being in many parts).
-        public static int CompressionThreshold { get; private set; } = 32;
+        public static int CompressionThreshold => Config.GetCVar<int>("net.compressthresh");
+
+        public static bool CompressionAllowed => Config.GetCVar<bool>("net.compression");
 
         private static readonly XZCompressOptions XzEncOpts = new XZCompressOptions
         {
@@ -22,7 +38,8 @@ namespace Robust.Shared.Network.Messages
             Check = LzmaCheck.None,
             ExtremeFlag = false,
             Level = IoCManager.Resolve<INetManager>().IsClient
-                ? LzmaCompLevel.Level1 :  LzmaCompLevel.Level6,
+                ? LzmaCompLevel.Level1
+                : LzmaCompLevel.Level6,
             LeaveOpen = true
         };
 
@@ -65,9 +82,7 @@ namespace Robust.Shared.Network.Messages
                 using var stateStream = new MemoryStream(stateData, false);
                 return serializer.Deserialize<T>(stateStream);
             }
-
         }
-
 
         protected void SerializeToBuffer<T>(NetOutgoingMessage buffer, T item)
         {
@@ -76,7 +91,7 @@ namespace Robust.Shared.Network.Messages
             {
                 serializer.Serialize(stateStream, item);
                 var length = (int) stateStream.Length;
-                if (length > CompressionThreshold)
+                if (CompressionAllowed && length > CompressionThreshold)
                 {
                     using var compressed = new MemoryStream();
 
@@ -89,7 +104,7 @@ namespace Robust.Shared.Network.Messages
 
                     compressed.Position = 0;
 
-                    var compressedLength = (int)compressed.Length;
+                    var compressedLength = (int) compressed.Length;
                     if (compressedLength < length)
                     {
                         buffer.WriteVariableInt32(-compressedLength);
@@ -112,7 +127,6 @@ namespace Robust.Shared.Network.Messages
 
             MsgSize += buffer.LengthBytes;
         }
-
 
     }
 
