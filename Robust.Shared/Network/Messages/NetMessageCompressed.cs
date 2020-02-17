@@ -38,6 +38,9 @@ namespace Robust.Shared.Network.Messages
         {
         }
 
+        protected void DeserializeFromBuffer<T>(NetIncomingMessage buffer, out T item, out int length) =>
+            item = DeserializeFromBuffer<T>(buffer, out length);
+
         protected T DeserializeFromBuffer<T>(NetIncomingMessage buffer, out int length)
         {
             length = buffer.ReadVariableInt32();
