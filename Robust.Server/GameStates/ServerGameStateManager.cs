@@ -61,6 +61,8 @@ namespace Robust.Server.GameStates
 
         private void HandleClientDisconnect(object sender, NetChannelArgs e)
         {
+            _entityManager.DropPlayerState(_playerManager.GetSessionById(e.Channel.SessionId));
+
             if (_ackedStates.ContainsKey(e.Channel.ConnectionId))
                 _ackedStates.Remove(e.Channel.ConnectionId);
         }
@@ -91,8 +93,6 @@ namespace Robust.Server.GameStates
             else
                 DebugTools.Assert("How did the client send us an ack without being connected?");
         }
-
-        private IDictionary<IPlayerSession, IList<EntityState>> _lastEntityStates = new Dictionary<IPlayerSession, IList<EntityState>>();
 
         private float? _maxUpdateRangeCache;
 
@@ -173,19 +173,17 @@ namespace Robust.Server.GameStates
             var (session, channel, lastAck) = job;
             //TODO: Cull these based on client view rectangle, remember the issues with transform parenting
 
-            var entities = lastAck == GameTick.Zero
+
+            var entStates = lastAck == GameTick.Zero
                 ? _entityManager.GetEntityStates(lastAck)
                 : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, MaxUpdateRange);
-            var players = _playerManager.GetPlayerStates(lastAck);
+            var playerStates = _playerManager.GetPlayerStates(lastAck);
             var deletions = _entityManager.GetDeletedEntities(lastAck);
             var mapData = _mapManager.GetStateData(lastAck);
 
-            // TODO: check for teleporters
-
-            _lastEntityStates[session] = entities;
 
             // lastAck varies with each client based on lag and such, we can't just make 1 global state and send it to everyone
-            var state = new GameState(lastAck, _gameTiming.CurTick, entities, players, deletions, mapData);
+            var state = new GameState(lastAck, _gameTiming.CurTick, entStates, playerStates, deletions, mapData);
 
             return (channel, state);
         }

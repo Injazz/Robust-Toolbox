@@ -31,5 +31,12 @@ namespace Robust.Server.Interfaces.GameObjects
         /// </summary>
         /// <param name="toTick">The last tick to delete the history for. Inclusive.</param>
         void CullDeletionHistory(GameTick toTick);
+
+        /// <summary>
+        ///     Removes entity state persistence information from the entity manager for a player.
+        /// </summary>
+        /// <param name="player"></param>
+        void DropPlayerState(IPlayerSession player);
+
     }
 }
