@@ -2,6 +2,7 @@ using System.IO;
 using Joveler.Compression.XZ;
 using Lidgren.Network;
 using Robust.Shared.GameStates;
+using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
 
@@ -17,10 +18,11 @@ namespace Robust.Shared.Network.Messages
 
         private static readonly XZCompressOptions XzEncOpts = new XZCompressOptions
         {
-            BufferSize = 4 * 1024 * 1024,
+            BufferSize = 12 * 1024 * 1024,
             Check = LzmaCheck.None,
             ExtremeFlag = false,
-            Level = LzmaCompLevel.Level1,
+            Level = IoCManager.Resolve<INetManager>().IsClient
+                ? LzmaCompLevel.Level1 :  LzmaCompLevel.Level6,
             LeaveOpen = true
         };
 

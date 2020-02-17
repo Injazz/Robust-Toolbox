@@ -1,7 +1,10 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using Lidgren.Network;
 using Robust.Shared.Interfaces.Network;
+using Robust.Shared.Network.Messages;
+using Robust.Shared.Serialization;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Network
@@ -214,7 +217,7 @@ namespace Robust.Shared.Network
 
             var message = _network.CreateNetMessage<MsgStringTableEntries>();
 
-            message.Entries = new MsgStringTableEntries.Entry[1];
+            message.Entries = new StringTableEntry[1];
             message.Entries[0].Id = id;
             message.Entries[0].String = str;
 
@@ -233,7 +236,7 @@ namespace Robust.Shared.Network
             var message = _network.CreateNetMessage<MsgStringTableEntries>();
 
             var count = _strings.Count;
-            message.Entries = new MsgStringTableEntries.Entry[count];
+            message.Entries = new StringTableEntry[count];
 
             var i = 0;
             foreach (var kvEntries in _strings)
@@ -249,9 +252,45 @@ namespace Robust.Shared.Network
     }
 
     /// <summary>
+    ///     A string table entry.
+    /// </summary>
+    [Serializable, NetSerializable]
+    public struct StringTableEntry
+    {
+        /// <summary>
+        ///     The ID of the string inside of the message.
+        /// </summary>
+        public int Id { get; set; }
+        /// <summary>
+        ///     The string contained inside of the message.
+        /// </summary>
+        public string String { get; set; }
+    }
+
+    /// <summary>
+    ///     A string table entry.
+    /// </summary>
+    [Serializable, NetSerializable]
+    public struct StringTableEntryArray : IEnumerable<StringTableEntry>
+    {
+
+        public StringTableEntry[] Entries { get; set; }
+
+        public ref StringTableEntry this[int i] => ref Entries[i];
+
+        public static implicit operator StringTableEntryArray(StringTableEntry[] a) => new StringTableEntryArray { Entries =  a };
+        public static implicit operator StringTableEntry[](StringTableEntryArray a) => a.Entries;
+
+        public IEnumerator<StringTableEntry> GetEnumerator() => ((IEnumerable<StringTableEntry>)Entries).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => Entries.GetEnumerator();
+
+    }
+
+    /// <summary>
     /// A net message for transmitting a string table entry to clients.
     /// </summary>
-    public class MsgStringTableEntries : NetMessage
+    public class MsgStringTableEntries : NetMessageCompressed
     {
         #region REQUIRED
         public static readonly MsgGroups GROUP = MsgGroups.String;
@@ -259,49 +298,22 @@ namespace Robust.Shared.Network
         public MsgStringTableEntries(INetChannel channel) : base(NAME, GROUP) { }
         #endregion
 
-        public Entry[] Entries { get; set; }
+        public StringTableEntryArray Entries { get; set; }
 
-        /// <summary>
-        ///     A string table entry.
-        /// </summary>
-        public struct Entry
-        {
-            /// <summary>
-            ///     The string contained inside of the message.
-            /// </summary>
-            public string String { get; set; }
-
-
-            /// <summary>
-            ///     The ID of the string inside of the message.
-            /// </summary>
-            public int Id { get; set; }
-        }
 
         /// <inheritdoc />
         public override void ReadFromBuffer(NetIncomingMessage buffer)
         {
-            var count = buffer.ReadUInt32();
-            Entries = new Entry[count];
-            for (var i = 0; i < count; i++)
-            {
-                Entries[i].Id = buffer.ReadVariableInt32();
-                Entries[i].String = buffer.ReadString();
-            }
+            Entries = DeserializeFromBuffer<StringTableEntryArray>(buffer, out _);
         }
 
         /// <inheritdoc />
         public override void WriteToBuffer(NetOutgoingMessage buffer)
         {
-            if (Entries == null)
+            if (Entries.Entries == null)
                 throw new InvalidOperationException("Entries is null!");
 
-            buffer.Write(Entries.Length);
-            foreach (var entry in Entries)
-            {
-                buffer.WriteVariableInt32(entry.Id);
-                buffer.Write(entry.String);
-            }
+            SerializeToBuffer(buffer, Entries);
         }
     }
 }

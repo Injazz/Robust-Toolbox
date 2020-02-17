@@ -90,7 +90,8 @@ namespace Robust.Shared.Serialization
             _objectsSerialized = 0;
             _objectsDeserialized = 0;
 
-            var types = reflectionManager.FindTypesWithAttribute<NetSerializableAttribute>().ToList();
+            var types = reflectionManager
+                .FindTypesWithAttribute<NetSerializableAttribute>().ToList();
 #if DEBUG
             foreach (var type in types)
             {

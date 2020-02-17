@@ -144,9 +144,12 @@ namespace Robust.Shared.Reflection
         {
             var types = new List<Type>();
 
+            var attributeType = typeof(T);
+
             foreach (var assembly in Assemblies)
             {
-                types.AddRange(assembly.GetTypes().Where(type => Attribute.IsDefined(type, typeof(T))));
+                types.AddRange(assembly.DefinedTypes
+                    .Where(type => type.CustomAttributes.Any(ca => ca.Constructor.DeclaringType == attributeType)));
             }
 
             return types;
