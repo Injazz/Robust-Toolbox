@@ -218,9 +218,9 @@ namespace Robust.Shared.IoC
                 {
                     asm = Assembly.LoadFrom(filePath);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    throw new InvalidOperationException($"When trying to load {typeof(TInterface).Name}, can't find {assembly} at {filePath}.");
+                    throw new InvalidOperationException($"Unable to load {typeof(TInterface).Name} from {assembly} ({filePath})", ex);
 
                 }
             }
