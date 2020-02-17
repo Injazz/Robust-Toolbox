@@ -214,7 +214,15 @@ namespace Robust.Shared.IoC
             catch (Exception)
             {
                 var filePath = Path.Combine(PathHelpers.GetExecutableDirectory(), assembly + ".dll");
-                asm = Assembly.LoadFrom(filePath);
+                try
+                {
+                    asm = Assembly.LoadFrom(filePath);
+                }
+                catch (Exception)
+                {
+                    throw new InvalidOperationException($"When trying to load {typeof(TInterface).Name}, can't find {assembly} at {filePath}.");
+
+                }
             }
 
             var interfaceType = typeof(TInterface);
