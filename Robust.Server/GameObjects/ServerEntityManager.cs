@@ -12,6 +12,7 @@ using Robust.Shared.GameObjects.Components.Transform;
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Interfaces.GameObjects.Components;
 using Robust.Shared.Interfaces.Map;
+using Robust.Shared.Interfaces.Timing;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
@@ -21,6 +22,7 @@ using Robust.Shared.Utility;
 
 namespace Robust.Server.GameObjects
 {
+
     /// <summary>
     /// Manager for entities -- controls things like template loading and instantiation
     /// </summary>
@@ -33,6 +35,7 @@ namespace Robust.Server.GameObjects
 
 #pragma warning disable 649
         [Dependency] private readonly IMapManager _mapManager;
+        [Dependency] private readonly IGameTiming _timing;
         [Dependency] private readonly IPauseManager _pauseManager;
 #pragma warning restore 649
 
@@ -56,6 +59,7 @@ namespace Robust.Server.GameObjects
                 newEntity.Transform.AttachParent(GetEntity(gridEntityId));
                 newEntity.Transform.LocalPosition = coordinates.Position;
             }
+
             return newEntity;
         }
 
@@ -74,6 +78,7 @@ namespace Robust.Server.GameObjects
                     ((Component)component).ClearTicks();
                 }
             }
+
             newEntity.Transform.AttachParent(_mapManager.GetMapEntity(coordinates.MapId));
             newEntity.Transform.WorldPosition = coordinates.Position;
             return newEntity;
@@ -92,6 +97,7 @@ namespace Robust.Server.GameObjects
             {
                 entity.RunMapInit();
             }
+
             return entity;
         }
 
@@ -148,6 +154,8 @@ namespace Robust.Server.GameObjects
             return movers;
         }
 
+        private readonly IDictionary<IPlayerSession, Vector2> _playerLastPosition
+            = new Dictionary<IPlayerSession, Vector2>();
         private readonly IDictionary<IPlayerSession, IDictionary<EntityUid, GameTick>> _playerLastSeen
             = new Dictionary<IPlayerSession, IDictionary<EntityUid, GameTick>>();
 
@@ -168,6 +176,23 @@ namespace Robust.Server.GameObjects
 
             return tick;
         }
+
+        private IEnumerable<EntityUid> GetLastSeenAfter(IPlayerSession player, GameTick fromTick)
+        {
+            if (!_playerLastSeen.TryGetValue(player, out var lastSeen))
+            {
+                lastSeen = new Dictionary<EntityUid, GameTick>();
+                _playerLastSeen[player] = lastSeen;
+            }
+
+            foreach (var (uid, tick) in lastSeen)
+            {
+                if (tick > fromTick)
+                {
+                    yield return uid;
+                }
+            }
+        }
         private void SetLastSeenTick(IPlayerSession player, EntityUid uid, GameTick tick)
         {
             if (!_playerLastSeen.TryGetValue(player, out var lastSeen))
@@ -177,6 +202,12 @@ namespace Robust.Server.GameObjects
             }
 
             lastSeen[uid] = tick;
+        }
+
+        public void DropPlayerState(IPlayerSession player)
+        {
+            _playerLastSeen.Remove(player);
+            _playerLastPosition.Remove(player);
         }
 
         private IEnumerable<IEntity> IncludeRelatives(IEnumerable<IEntity> children)
@@ -205,7 +236,6 @@ namespace Robust.Server.GameObjects
                 } while (ent != null && !ent.Deleted);
             }
 
-
             return set;
         }
 
@@ -214,13 +244,75 @@ namespace Robust.Server.GameObjects
         {
 
             var transform = player.AttachedEntity.Transform;
-            var point = transform.WorldPosition;
+            var position = transform.WorldPosition;
             var mapId = transform.MapID;
+
+            if (!_playerLastPosition.TryGetValue(player, out var lastPos))
+            {
+                lastPos = position;
+            }
 
             var seenMovers = GetSeenMovers(player);
 
             var includedEnts = new HashSet<EntityUid>();
-            var stateEntities = new List<EntityState>();
+            var entityStates = new List<EntityState>();
+
+            // if this isn't a continuous tick update frame, update everything not seen since
+            // cause the bubble at frames other than this and last tick are unknown
+            if ((_timing.CurTick.Value - fromTick.Value) > 1)
+            {
+                foreach (var uid in GetLastSeenAfter(player, fromTick))
+                {
+                    if (!TryGetEntity(uid, out var entity))
+                    {
+                        continue;
+                    }
+
+                    if (entity.Deleted)
+                    {
+                        continue;
+                    }
+
+                    seenMovers.Add(uid);
+                }
+            }
+            else
+            {
+                // grab things that were in seen last known tick
+                // check to see if anything is no longer in the previous bubble or the current bubble
+                foreach (var uid in GetLastSeenAfter(player, fromTick))
+                {
+                    if (!TryGetEntity(uid, out var entity))
+                    {
+                        continue;
+                    }
+
+                    if (entity.Deleted)
+                    {
+                        continue;
+                    }
+
+                    var txf = entity.Transform;
+
+                    if (!txf.Initialized)
+                    {
+                        continue;
+                    }
+
+                    var entPos = txf.WorldPosition;
+
+                    if ((entPos - position).Length <= range)
+                    {
+                        continue;
+                    }
+
+                    if ((entPos - lastPos).Length > range)
+                    {
+                        seenMovers.Add(uid);
+                    }
+                }
+
+            }
 
             foreach (var uid in seenMovers.ToList())
             {
@@ -232,18 +324,16 @@ namespace Robust.Server.GameObjects
 
                 if (entity.TryGetComponent(out PhysicsComponent body))
                 {
-
                     if (body.LinearVelocity.EqualsApprox(Vector2.Zero, MinimumMotionForMovers))
                     {
                         seenMovers.Remove(uid);
                     }
-
                 }
 
                 var entityState = GetEntityState(ComponentManager, uid, fromTick);
-                stateEntities.Add(entityState);
+                entityStates.Add(entityState);
 
-                if (entityState.ComponentStates != null && (entity.Transform.WorldPosition - point).Length > range)
+                if (entityState.ComponentStates != null && (entity.Transform.WorldPosition - position).Length > range)
                 {
                     var idx = entityState.ComponentStates.FindIndex(x => x is TransformComponent.TransformComponentState);
                     if (idx != -1)
@@ -258,7 +348,7 @@ namespace Robust.Server.GameObjects
                 includedEnts.Add(uid);
             }
 
-            foreach (var entity in IncludeRelatives(GetEntitiesInRange(mapId, point, range)))
+            foreach (var entity in IncludeRelatives(GetEntitiesInRange(mapId, position, range)))
             {
                 DebugTools.Assert(entity.Initialized && !entity.Deleted);
 
@@ -280,7 +370,7 @@ namespace Robust.Server.GameObjects
 
                 includedEnts.Add(uid);
 
-                stateEntities.Add(GetEntityState(ComponentManager, uid, lastSeen));
+                entityStates.Add(GetEntityState(ComponentManager, uid, lastSeen));
 
                 SetLastSeenTick(player, uid, fromTick);
 
@@ -299,8 +389,35 @@ namespace Robust.Server.GameObjects
                 }
             }
 
+            // save positions of entities that are in the within the current bubble
+            var positions = new Dictionary<EntityUid,Vector2>();
+
+            foreach (var entState in entityStates)
+            {
+                var uid = entState.Uid;
+                var ent = GetEntity(uid);
+                if (ent.Deleted || !ent.Initialized)
+                {
+                    continue;
+                }
+
+                var txf = ent.Transform;
+                if (!txf.Initialized)
+                {
+                    continue;
+                }
+
+                // exclude saving positions that are outside the bubble
+                if ((txf.WorldPosition - position).Length < range)
+                {
+                    continue;
+                }
+
+                positions[uid] = txf.WorldPosition;
+            }
+
             // no point sending an empty collection
-            return stateEntities.Count == 0 ? default : stateEntities;
+            return entityStates.Count == 0 ? default : entityStates;
         }
 
         public override void DeleteEntity(IEntity e)
@@ -407,5 +524,7 @@ namespace Robust.Server.GameObjects
 
             return new EntityState(entityUid, changed, compStates);
         }
+
     }
+
 }
