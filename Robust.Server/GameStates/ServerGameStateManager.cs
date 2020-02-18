@@ -95,11 +95,6 @@ namespace Robust.Server.GameStates
                 DebugTools.Assert("How did the client send us an ack without being connected?");
         }
 
-        private float? _maxUpdateRangeCache;
-
-        private float MaxUpdateRange => _maxUpdateRangeCache
-            ??= _configurationManager.GetCVar<float>("net.maxupdaterange");
-
         /// <inheritdoc />
         public void SendGameStateUpdate()
         {
@@ -176,7 +171,7 @@ namespace Robust.Server.GameStates
 
             var entStates = lastAck == GameTick.Zero
                 ? _entityManager.GetEntityStates(lastAck)
-                : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, MaxUpdateRange);
+                : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, _entityManager.MaxUpdateRange);
             var playerStates = _playerManager.GetPlayerStates(lastAck);
             var deletions = _entityManager.GetDeletedEntities(lastAck);
             var mapData = _mapManager.GetStateData(lastAck);

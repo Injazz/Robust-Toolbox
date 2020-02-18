@@ -38,5 +38,7 @@ namespace Robust.Server.Interfaces.GameObjects
         /// <param name="player"></param>
         void DropPlayerState(IPlayerSession player);
 
+        float MaxUpdateRange { get; }
+
     }
 }

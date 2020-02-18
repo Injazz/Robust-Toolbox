@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using Robust.Server.GameObjects.Components.Container;
+using Robust.Server.GameStates;
 using Robust.Server.Interfaces.GameObjects;
 using Robust.Server.Interfaces.Player;
 using Robust.Server.Interfaces.Timing;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameObjects.Components;
 using Robust.Shared.GameObjects.Components.Transform;
+using Robust.Shared.Interfaces.Configuration;
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Interfaces.GameObjects.Components;
 using Robust.Shared.Interfaces.Map;
@@ -35,11 +37,14 @@ namespace Robust.Server.GameObjects
 
 #pragma warning disable 649
         [Dependency] private readonly IMapManager _mapManager;
-
         [Dependency] private readonly IGameTiming _timing;
-
         [Dependency] private readonly IPauseManager _pauseManager;
+        [Dependency] private readonly IConfigurationManager _configurationManager;
 #pragma warning restore 649
+
+        private float? _maxUpdateRangeCache;
+        public float MaxUpdateRange => _maxUpdateRangeCache
+            ??= _configurationManager.GetCVar<float>("net.maxupdaterange");
 
         private int _nextServerEntityUid = (int) EntityUid.FirstUid;
 
@@ -156,13 +161,12 @@ namespace Robust.Server.GameObjects
             return movers;
         }
 
-        private readonly IDictionary<IPlayerSession, Vector2> _playerLastPosition
-            = new Dictionary<IPlayerSession, Vector2>();
-
         private readonly IDictionary<IPlayerSession, IDictionary<EntityUid, GameTick>> _playerLastSeen
             = new Dictionary<IPlayerSession, IDictionary<EntityUid, GameTick>>();
 
         private static readonly Vector2 Vector2NaN = new Vector2(float.NaN, float.NaN);
+
+        private static readonly Angle AngleNaN = new Angle(float.NaN);
 
         private GameTick GetLastSeenTick(IPlayerSession player, EntityUid uid)
         {
@@ -246,7 +250,6 @@ namespace Robust.Server.GameObjects
         public void DropPlayerState(IPlayerSession player)
         {
             _playerLastSeen.Remove(player);
-            _playerLastPosition.Remove(player);
         }
 
         private IEnumerable<IEntity> IncludeRelatives(IEnumerable<IEntity> children)
@@ -299,15 +302,16 @@ namespace Robust.Server.GameObjects
         /// <inheritdoc />
         public List<EntityState> UpdatePlayerSeenEntityStates(GameTick fromTick, IPlayerSession player, float range)
         {
+            var playerEnt = player.AttachedEntity;
+            if (playerEnt == null)
+            {
+                // super-observer?
+                return GetEntityStates(fromTick);
+            }
 
-            var transform = player.AttachedEntity.Transform;
+            var transform = playerEnt.Transform;
             var position = transform.WorldPosition;
             var mapId = transform.MapID;
-
-            if (!_playerLastPosition.TryGetValue(player, out var lastPos))
-            {
-                lastPos = position;
-            }
 
             var seenMovers = GetSeenMovers(player);
 
@@ -342,7 +346,8 @@ namespace Robust.Server.GameObjects
                     if (idx != -1)
                     {
                         var oldState = (TransformComponent.TransformComponentState) state.ComponentStates[idx];
-                        var newState = new TransformComponent.TransformComponentState(Vector2NaN, oldState.Rotation, oldState.ParentID);
+
+                        var newState = new TransformComponent.TransformComponentState(oldState.LocalPosition, AngleNaN, oldState.ParentID);
                         state.ComponentStates[idx] = newState;
                         seenMovers.Remove(uid);
                     }
@@ -413,7 +418,7 @@ namespace Robust.Server.GameObjects
                         }
 
                         var oldState = (TransformComponent.TransformComponentState) state.ComponentStates[idx];
-                        var newState = new TransformComponent.TransformComponentState(Vector2NaN, oldState.Rotation, oldState.ParentID);
+                        var newState = new TransformComponent.TransformComponentState(oldState.LocalPosition, AngleNaN, oldState.ParentID);
                         state.ComponentStates[idx] = newState;
                     }
                 }
@@ -448,6 +453,67 @@ namespace Robust.Server.GameObjects
         public void CullDeletionHistory(GameTick toTick)
         {
             _deletionHistory.RemoveAll(hist => hist.tick <= toTick);
+        }
+
+        public override bool UpdateEntityTree(IEntity entity)
+        {
+            var curTick = _timing.CurTick;
+            var updated = base.UpdateEntityTree(entity);
+
+
+            if (entity.Deleted
+                || !entity.Initialized
+                || !Entities.ContainsKey(entity.Uid)
+                || !entity.TryGetComponent(out ITransformComponent txf)
+                || !txf.Initialized)
+            {
+                return updated;
+            }
+
+            // note: updated can be false even if something moved a bit
+
+            foreach (var (player, lastSeen) in _playerLastSeen)
+            {
+                var playerEnt = player.AttachedEntity;
+                if (playerEnt == null)
+                {
+                    // player has no entity, gaf?
+                    continue;
+                }
+
+                var playerUid = playerEnt.Uid;
+                if (!lastSeen.TryGetValue(playerUid, out var playerTick))
+                {
+                    // player can't "see" itself, gaf?
+                    continue;
+                }
+
+                if (!playerEnt.TryGetComponent(out ITransformComponent playerTxf))
+                {
+                    // not in world
+                    continue;
+                }
+
+                var entityUid = entity.Uid;
+                if (!lastSeen.TryGetValue(entityUid, out var tick))
+                {
+                    // never saw it other than tick 0
+                    continue;
+                }
+
+                if (tick >= playerTick)
+                {
+                    // currently seeing it
+                    continue;
+                }
+
+                if ((txf.WorldPosition - playerTxf.WorldPosition).Length > MaxUpdateRange)
+                {
+                    GetSeenMovers(player).Add(entityUid);
+                }
+            }
+
+            return updated;
         }
 
         #endregion IEntityManager Members

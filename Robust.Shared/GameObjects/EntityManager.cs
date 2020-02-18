@@ -544,7 +544,7 @@ namespace Robust.Shared.GameObjects
         private ConcurrentDictionary<MapId, DynamicTree<IEntity>> _entityTreesPerMap =
             new ConcurrentDictionary<MapId, DynamicTree<IEntity>>();
 
-        public bool UpdateEntityTree(IEntity entity)
+        public virtual bool UpdateEntityTree(IEntity entity)
         {
             if (entity.Deleted)
             {
