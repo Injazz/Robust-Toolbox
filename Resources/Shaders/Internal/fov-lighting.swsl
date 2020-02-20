@@ -19,7 +19,10 @@ void vertex()
 void fragment()
 {
     vec2 diff = worldPosition - center;
-    if (!doesOcclude(diff, TEXTURE, 0.25, 16.0/32.0))
+
+    float v = visibility(diff, TEXTURE, 0.25, 16.0/32.0);
+
+    if (v < 0)
     {
         discard;
     }
