@@ -6,11 +6,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.Loader;
+using Robust.Shared.ContentPack;
+using Robust.Shared.Interfaces.Network;
 
 namespace Robust.Shared.Serialization
 {
 
-    public class RobustSerializer : IRobustSerializer
+    public partial class RobustSerializer : IRobustSerializer
     {
 
         [Dependency]
@@ -21,8 +24,10 @@ namespace Robust.Shared.Serialization
 
         private HashSet<Type> SerializableTypes;
 
-#region Statistics
+        #region Statistics
+
         public static long LargestObjectSerializedBytes { get; private set; }
+
         public static Type LargestObjectSerializedType { get; private set; }
 
         public static long BytesSerialized { get; private set; }
@@ -30,15 +35,18 @@ namespace Robust.Shared.Serialization
         public static long ObjectsSerialized { get; private set; }
 
         public static long LargestObjectDeserializedBytes { get; private set; }
+
         public static Type LargestObjectDeserializedType { get; private set; }
 
         public static long BytesDeserialized { get; private set; }
 
         public static long ObjectsDeserialized { get; private set; }
-#endregion
+
+        #endregion
 
         public void Initialize()
         {
+            var mappedStringSerializer = new MappedStringSerializer();
             var types = reflectionManager.FindTypesWithAttribute<NetSerializableAttribute>().ToList();
 #if DEBUG
             foreach (var type in types)
@@ -50,9 +58,25 @@ namespace Robust.Shared.Serialization
             }
 #endif
 
-            var settings = new Settings();
+            var settings = new Settings
+            {
+                CustomTypeSerializers = new ITypeSerializer[] {mappedStringSerializer}
+            };
             Serializer = new Serializer(types, settings);
             SerializableTypes = new HashSet<Type>(Serializer.GetTypeMap().Keys);
+
+            var defaultAssemblies = AssemblyLoadContext.Default.Assemblies;
+            var gameAssemblies = IoCManager.Resolve<IModLoader>().GetGameAssemblies();
+            if (IoCManager.Resolve<INetManager>().IsClient)
+            {
+                MappedStringSerializer.LockMappedStrings = true;
+            }
+            else
+            {
+                MappedStringSerializer.AddStrings(defaultAssemblies.First(a => a.GetName().Name == "Robust.Shared"));
+                MappedStringSerializer.AddStrings(gameAssemblies.First(a => a.GetName().Name == "Content.Shared"));
+            }
+            MappedStringSerializer.NetworkInitialize(IoCManager.Resolve<INetManager>());
         }
 
         public void Serialize(Stream stream, object toSerialize)

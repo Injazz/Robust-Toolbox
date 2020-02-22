@@ -212,6 +212,11 @@ namespace Robust.Shared.GameObjects
             return _typeFactory.CreateInstance<IComponent>(GetRegistration(componentName).Type);
         }
 
+        public IComponent GetComponent(uint netId)
+        {
+            return _typeFactory.CreateInstance<IComponent>(GetRegistration(netId).Type);
+        }
+
         public IComponentRegistration GetRegistration(string componentName)
         {
             try

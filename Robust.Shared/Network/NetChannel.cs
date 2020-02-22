@@ -55,7 +55,19 @@ namespace Robust.Shared.Network
         /// <inheritdoc />
         public void SendMessage(NetMessage message)
         {
+            if (_manager.IsClient)
+            {
+                _manager.ClientSendMessage(message);
+                return;
+            }
+
             _manager.ServerSendMessage(message, this);
+        }
+
+        /// <inheritdoc />
+        public NetIncomingMessage ReadMessage()
+        {
+            return _connection.Peer.ReadMessage();
         }
 
         /// <inheritdoc />

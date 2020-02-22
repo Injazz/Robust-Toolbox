@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using Robust.Shared.Interfaces.Resources;
 using Robust.Shared.Timing;
 
@@ -44,5 +46,8 @@ namespace Robust.Shared.ContentPack
         ///     Sets the testing callbacks that will be passed to <see cref="GameShared.SetTestingCallbacks"/>.
         /// </summary>
         void SetModuleBaseCallbacks(ModuleTestingCallbacks testingCallbacks);
+
+        IEnumerable<Assembly> GetGameAssemblies();
+
     }
 }

@@ -88,6 +88,8 @@ namespace Robust.Shared.ContentPack
             _loadContext.Resolving += ResolvingAssembly;
         }
 
+        public virtual IEnumerable<Assembly> GetGameAssemblies() => _loadContext.Assemblies;
+
         public virtual void LoadGameAssembly<T>(Stream assembly, Stream symbols = null)
             where T : GameShared
         {

@@ -11,9 +11,11 @@ namespace Robust.Shared.GameObjects.Components
     [Serializable, NetSerializable]
     class ClickableComponentState : ComponentState
     {
+        public override uint NetID => NetIDs.CLICKABLE;
+
         public Box2? LocalBounds { get; }
 
-        public ClickableComponentState(Box2? localBounds) : base(NetIDs.CLICKABLE)
+        public ClickableComponentState(Box2? localBounds)
         {
             LocalBounds = localBounds;
         }

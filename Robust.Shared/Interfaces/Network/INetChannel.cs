@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using Lidgren.Network;
 using Robust.Shared.Network;
 
 namespace Robust.Shared.Interfaces.Network
@@ -54,5 +55,6 @@ namespace Robust.Shared.Interfaces.Network
         /// </summary>
         /// <param name="reason">Reason why it was disconnected.</param>
         void Disconnect(string reason);
+
     }
 }

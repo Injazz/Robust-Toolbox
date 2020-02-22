@@ -5,12 +5,15 @@ using Robust.Shared.Interfaces.Network;
 using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
 using System.IO;
+using System.IO.Compression;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Network.Messages
 {
+
     public class MsgState : NetMessage
     {
+
         // If a state is large enough we send it ReliableUnordered instead.
         // This is to avoid states being so large that they consistently fail to reach the other end
         // (due to being in many parts).
@@ -19,6 +22,7 @@ namespace Robust.Shared.Network.Messages
         #region REQUIRED
 
         public static readonly MsgGroups GROUP = MsgGroups.Entity;
+
         public static readonly string NAME = nameof(MsgState);
 
         public MsgState(INetChannel channel) : base(NAME, GROUP)
@@ -35,9 +39,22 @@ namespace Robust.Shared.Network.Messages
         {
             MsgSize = buffer.LengthBytes;
             var length = buffer.ReadVariableInt32();
-            var stateData = buffer.ReadBytes(length);
-            using (var stateStream = new MemoryStream(stateData))
+            if (length < 0)
             {
+                length = -length;
+            var stateData = buffer.ReadBytes(length);
+                using var stateStream = new MemoryStream(stateData);
+                var serializer = IoCManager.Resolve<IRobustSerializer>();
+                using var deflateStream = new DeflateStream(stateStream, CompressionMode.Decompress, true);
+                using var bufferStream = new MemoryStream();
+                deflateStream.CopyTo(bufferStream);
+                bufferStream.Position = 0;
+                State = serializer.Deserialize<GameState>(bufferStream);
+            }
+            else
+            {
+                var stateData = buffer.ReadBytes(length);
+                using var stateStream = new MemoryStream(stateData);
                 var serializer = IoCManager.Resolve<IRobustSerializer>();
                 State = serializer.Deserialize<GameState>(stateStream);
             }
@@ -51,9 +68,35 @@ namespace Robust.Shared.Network.Messages
             using (var stateStream = new MemoryStream())
             {
                 DebugTools.Assert(stateStream.Length <= Int32.MaxValue);
-                serializer.Serialize(stateStream, State);
-                buffer.WriteVariableInt32((int) stateStream.Length);
+
+                using var bufferStream = new MemoryStream();
+                serializer.Serialize(bufferStream, State);
+                bufferStream.Position = 0;
+
+                if (bufferStream.Length > 32)
+                {
+                    using (var deflateStream = new DeflateStream(stateStream, CompressionLevel.Optimal, true))
+                    {
+                        bufferStream.CopyTo(deflateStream);
+                        bufferStream.Position = 0;
+                    }
+
+                    if (stateStream.Length > bufferStream.Length)
+                    {
+                        buffer.WriteVariableInt32((int) bufferStream.Length);
+                        buffer.Write(bufferStream.ToArray());
+                    }
+                    else
+                    {
+                        buffer.WriteVariableInt32((int) -stateStream.Length);
                 buffer.Write(stateStream.ToArray());
+            }
+                }
+                else
+                {
+                    buffer.WriteVariableInt32((int) bufferStream.Length);
+                    buffer.Write(bufferStream.ToArray());
+                }
             }
 
             _hasWritten = false;
@@ -73,6 +116,7 @@ namespace Robust.Shared.Network.Messages
             {
                 return true;
             }
+
             return MsgSize > ReliableThreshold;
         }
 
@@ -88,5 +132,7 @@ namespace Robust.Shared.Network.Messages
                 return base.DeliveryMethod;
             }
         }
+
     }
+
 }

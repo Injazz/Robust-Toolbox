@@ -178,6 +178,17 @@ namespace Robust.Client.GameObjects
             return new EntityUid(_nextClientEntityUid++);
         }
 
+        public override IEntity GetEntity(EntityUid uid)
+        {
+            if (Entities.TryGetValue(uid, out var ent))
+            {
+                return ent;
+            }
+
+            Logger.ErrorS("entity", $"Could not find entity {uid} on this client.");
+            return null;
+        }
+
         private static void HandleEntityState(IComponentManager compMan, IEntity entity, EntityState curState,
             EntityState nextState)
         {
@@ -200,7 +211,8 @@ namespace Robust.Client.GameObjects
                         if (compMan.HasComponent(entityUid, compChange.NetID))
                             continue;
 
-                        var newComp = (Component) IoCManager.Resolve<IComponentFactory>().GetComponent(compChange.ComponentName);
+                        //var newComp = (Component) IoCManager.Resolve<IComponentFactory>().GetComponent(compChange.ComponentName);
+                        var newComp = (Component) IoCManager.Resolve<IComponentFactory>().GetComponent(compChange.NetID);
                         newComp.Owner = entity;
                         compMan.AddComponent(entity, newComp, true);
                     }

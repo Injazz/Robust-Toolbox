@@ -17,6 +17,7 @@ using Robust.Shared.Interfaces.GameObjects;
 using System.Linq;
 using Robust.Server.Interfaces.Timing;
 using Robust.Shared.GameObjects.Components.Map;
+using Robust.Shared.Interfaces.Serialization;
 using YamlDotNet.Core;
 
 namespace Robust.Server.Maps
@@ -831,6 +832,8 @@ namespace Robust.Server.Maps
 
                 RootNode = stream.Documents[0].RootNode;
                 GridCount = ((YamlSequenceNode)RootNode["grids"]).Children.Count;
+
+                RobustSerializer.MappedStringSerializer.AddStrings(stream);
             }
         }
     }

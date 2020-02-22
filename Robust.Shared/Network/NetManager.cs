@@ -12,6 +12,7 @@ using Lidgren.Network;
 using Robust.Shared.Configuration;
 using Robust.Shared.Interfaces.Configuration;
 using Robust.Shared.Interfaces.Network;
+using Robust.Shared.Interfaces.Serialization;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
 using Robust.Shared.Utility;
@@ -53,6 +54,7 @@ namespace Robust.Shared.Network
 
 #pragma warning disable 649
         [Dependency] private readonly IConfigurationManager _config;
+        [Dependency] private readonly IRobustSerializer _serializer;
 #pragma warning restore 649
 
         /// <summary>
@@ -193,7 +195,15 @@ namespace Robust.Shared.Network
             _config.RegisterCVar("net.fakelagrand", 0.0f, CVar.CHEAT, _fakeLagRandomChanged);
 #endif
 
-            _strings.Initialize(this, () => { OnConnected(ServerChannel); });
+            _strings.Initialize(this, () =>
+            {
+                Logger.InfoS("net","Message string table loaded.");
+            });
+            _serializer.ClientHandshakeComplete += () =>
+            {
+                Logger.InfoS("net","Client completed serializer handshake.");
+                OnConnected(ServerChannel);
+            };
 
             _initialized = true;
         }
@@ -549,17 +559,20 @@ namespace Robust.Shared.Network
             }
 
             // Handshake complete!
-            HandleInitialHandshakeComplete(connection);
+            await HandleInitialHandshakeComplete(connection);
         }
 
-        private void HandleInitialHandshakeComplete(NetConnection sender)
+        private async Task HandleInitialHandshakeComplete(NetConnection sender)
         {
             var session = _assignedSessions[sender];
 
             var channel = new NetChannel(this, sender, session);
+
             _channels.Add(sender, channel);
 
             _strings.SendFullTable(channel);
+
+            await _serializer.Handshake(channel);
 
             Logger.InfoS("net", $"{channel.RemoteEndPoint}: Connected");
 
@@ -640,6 +653,12 @@ namespace Robust.Shared.Network
             try
             {
                 instance.ReadFromBuffer(msg);
+            }
+            catch (InvalidCastException ice)
+            {
+                Logger.ErrorS("net",
+                    $"{msg.SenderConnection.RemoteEndPoint}: Wrong deserialization of {type.Name} packet: {ice.Message}");
+                throw;
             }
             catch (Exception e) // yes, we want to catch ALL exeptions for security
             {

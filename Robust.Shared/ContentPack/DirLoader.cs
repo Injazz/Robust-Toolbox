@@ -8,14 +8,18 @@ using Robust.Shared.Utility;
 
 namespace Robust.Shared.ContentPack
 {
+
     internal partial class ResourceManager
     {
+
         /// <summary>
         ///     Holds info about a directory that is mounted in the VFS.
         /// </summary>
         class DirLoader : IContentRoot
         {
+
             private readonly DirectoryInfo _directory;
+
             private readonly ISawmill _sawmill;
 
             /// <summary>
@@ -119,11 +123,72 @@ namespace Robust.Shared.ContentPack
                     if (mismatch)
                     {
                         _sawmill.Warning("Path '{0}' has mismatching case from file on disk ('{1}'). " +
-                                        "This can cause loading failures on certain file system configurations " +
-                                        "and should be corrected.", path, diskPath);
+                            "This can cause loading failures on certain file system configurations " +
+                            "and should be corrected.", path, diskPath);
                     }
                 });
             }
+
+            public IEnumerable<string> GetRelativeFilePaths()
+            {
+                foreach (var file in _directory.EnumerateFiles())
+                {
+                    if ((file.Attributes & FileAttributes.Hidden) != 0 || file.Name[0] == '.')
+                        continue;
+
+                    var filePath = file.FullName;
+                    var relPath = filePath.Substring(_directory.FullName.Length);
+                    yield return ResourcePath.FromRelativeSystemPath(relPath).ToRootedPath().ToString();
+                }
+
+                foreach (var subDir in _directory.EnumerateDirectories())
+                {
+                    if ((subDir.Attributes & FileAttributes.Hidden) != 0 || subDir.Name[0] == '.')
+                        continue;
+
+                    switch (subDir.Name)
+                    {
+                        case "logs":
+                            continue;
+                    }
+
+                    foreach (var relPath in GetRelativeFilePaths(subDir))
+                    {
+                        yield return relPath;
+                    }
+                }
+            }
+
+            private IEnumerable<string> GetRelativeFilePaths(DirectoryInfo dir)
+            {
+                foreach (var file in dir.EnumerateFiles())
+                {
+                    if ((file.Attributes & FileAttributes.Hidden) != 0 || file.Name[0] == '.')
+                    {
+                        continue;
+                    }
+
+                    var filePath = file.FullName;
+                    var relPath = filePath.Substring(_directory.FullName.Length);
+                    yield return ResourcePath.FromRelativeSystemPath(relPath).ToRootedPath().ToString();
+                }
+
+                foreach (var subDir in dir.EnumerateDirectories())
+                {
+                    if (((subDir.Attributes & FileAttributes.Hidden) != 0) || subDir.Name[0] == '.')
+                    {
+                        continue;
+                    }
+
+                    foreach (var relPath in GetRelativeFilePaths(subDir))
+                    {
+                        yield return relPath;
+                    }
+                }
+            }
+
         }
+
     }
+
 }

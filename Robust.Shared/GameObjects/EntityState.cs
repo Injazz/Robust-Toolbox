@@ -1,11 +1,13 @@
 ﻿using Robust.Shared.Serialization;
 using System;
 using System.Collections.Generic;
+using Robust.Shared.Interfaces.GameObjects;
+using Robust.Shared.IoC;
 
 namespace Robust.Shared.GameObjects
 {
     [Serializable, NetSerializable]
-    public class EntityState
+    public sealed class EntityState
     {
         public EntityUid Uid { get; }
         public List<ComponentChanged> ComponentChanges { get; }
@@ -39,13 +41,12 @@ namespace Robust.Shared.GameObjects
         /// <summary>
         ///     The prototype name of the component to add.
         /// </summary>
-        public readonly string ComponentName;
+        public string ComponentName => IoCManager.Resolve<IComponentFactory>().GetRegistration(NetID).Name;
 
-        public ComponentChanged(bool deleted, uint netId, string componentName)
+        public ComponentChanged(bool deleted, uint netId)
         {
             Deleted = deleted;
             NetID = netId;
-            ComponentName = componentName;
         }
 
         public override string ToString()
@@ -53,14 +54,14 @@ namespace Robust.Shared.GameObjects
             return $"{(Deleted ? "D" : "C")} {NetID} {ComponentName}";
         }
 
-        public static ComponentChanged Added(uint netId, string componentName)
+        public static ComponentChanged Added(uint netId)
         {
-            return new ComponentChanged(false, netId, componentName);
+            return new ComponentChanged(false, netId);
         }
 
         public static ComponentChanged Removed(uint netId)
         {
-            return new ComponentChanged(true, netId, null);
+            return new ComponentChanged(true, netId);
         }
     }
 }

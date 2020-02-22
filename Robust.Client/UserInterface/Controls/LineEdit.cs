@@ -341,7 +341,11 @@ namespace Robust.Client.UserInterface.Controls
                     if (Editable)
                     {
                         var clipboard = IoCManager.Resolve<IClipboardManager>();
-                        InsertAtCursor(clipboard.GetText());
+                        var text = clipboard.GetText();
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            InsertAtCursor(text);
+                        }
                     }
                 }
                 else if (args.Function == EngineKeyFunctions.TextDelete)

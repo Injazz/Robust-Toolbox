@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Robust.Server.Interfaces;
 using Robust.Server.Interfaces.Player;
 using Robust.Shared.Enums;
@@ -104,6 +105,50 @@ namespace Robust.Server.Player
             }
         }
 
+        public bool TryGetSessionByChannel(INetChannel channel, out IPlayerSession session)
+        {
+            _sessionsLock.EnterReadLock();
+            try
+            {
+                // Should only be one session per client. Returns that session, in theory.
+                if (_sessions.TryGetValue(channel.SessionId, out var sessionImpl))
+                {
+                    session = sessionImpl;
+                    return true;
+                }
+
+                session = null;
+                return false;
+            }
+            finally
+            {
+                _sessionsLock.ExitReadLock();
+            }
+        }
+
+        public async Task<IPlayerSession> WaitForSessionByChannel(INetChannel channel, CancellationToken ct = default)
+        {
+            for (;;)
+            {
+                if (TryGetSessionByChannel(channel, out IPlayerSession session))
+                {
+                    return session;
+                }
+
+                if (ct.IsCancellationRequested)
+                {
+                    return null;
+                }
+
+                await Task.Delay(10, ct);
+
+                if (ct.IsCancellationRequested)
+                {
+                    return null;
+                }
+            }
+        }
+
         /// <inheritdoc />
         public IPlayerSession GetSessionById(NetSessionId index)
         {
@@ -148,6 +193,29 @@ namespace Robust.Server.Player
             }
             session = default;
             return false;
+        }
+
+        public async Task<IPlayerSession> WaitForSessionById(NetSessionId sessionId, CancellationToken ct = default)
+        {
+            for (;;)
+            {
+                if (TryGetSessionById(sessionId, out var session))
+                {
+                    return session;
+                }
+
+                if (ct.IsCancellationRequested)
+                {
+                    return null;
+                }
+
+                await Task.Delay(10, ct);
+
+                if (ct.IsCancellationRequested)
+                {
+                    return null;
+                }
+            }
         }
 
         /// <summary>
@@ -268,6 +336,8 @@ namespace Robust.Server.Player
         /// <param name="args"></param>
         private void NewSession(object sender, NetChannelArgs args)
         {
+            _sessionsLock.EnterWriteLock();
+
             if (!_playerData.TryGetValue(args.Channel.SessionId, out var data))
             {
                 data = new PlayerData(args.Channel.SessionId);
@@ -275,9 +345,6 @@ namespace Robust.Server.Player
             }
             var session = new PlayerSession(this, args.Channel, data);
 
-            session.PlayerStatusChanged += (obj, sessionArgs) => OnPlayerStatusChanged(session, sessionArgs.OldStatus, sessionArgs.NewStatus);
-
-            _sessionsLock.EnterWriteLock();
             try
             {
                 _sessions.Add(args.Channel.SessionId, session);
@@ -286,6 +353,9 @@ namespace Robust.Server.Player
             {
                 _sessionsLock.ExitWriteLock();
             }
+
+            session.PlayerStatusChanged += (obj, sessionArgs) => OnPlayerStatusChanged(session, sessionArgs.OldStatus, sessionArgs.NewStatus);
+
         }
 
         private void OnPlayerStatusChanged(IPlayerSession session, SessionStatus oldStatus, SessionStatus newStatus)
@@ -318,9 +388,16 @@ namespace Robust.Server.Player
             Dirty();
         }
 
-        private void HandleWelcomeMessageReq(MsgServerInfoReq message)
+        private async void HandleWelcomeMessageReq(MsgServerInfoReq message)
         {
-            var session = GetSessionByChannel(message.MsgChannel);
+            using var cts = new CancellationTokenSource(10000);
+            var session = await WaitForSessionByChannel(message.MsgChannel, cts.Token);
+            if (session == null)
+            {
+                // TODO: clean up
+                message.MsgChannel.Disconnect("Timed out handling for welcome message request.");
+                return;
+            }
 
             var netMsg = message.MsgChannel.CreateNetMessage<MsgServerInfo>();
 
@@ -332,7 +409,7 @@ namespace Robust.Server.Player
             message.MsgChannel.SendMessage(netMsg);
         }
 
-        private void HandlePlayerListReq(MsgPlayerListReq message)
+        private async void HandlePlayerListReq(MsgPlayerListReq message)
         {
             var channel = message.MsgChannel;
             var players = GetAllPlayers().ToArray();
@@ -341,7 +418,16 @@ namespace Robust.Server.Player
             // client session is complete, set their status accordingly.
             // This is done before the packet is built, so that the client
             // can see themselves Connected.
-            var session = GetSessionByChannel(channel);
+            using var cts = new CancellationTokenSource(10000);
+            var session = await WaitForSessionByChannel(channel, cts.Token);
+
+            if (session == null)
+            {
+                // TODO: clean up
+                message.MsgChannel.Disconnect("Timed out handling for welcome message request.");
+                return;
+            }
+
             session.Status = SessionStatus.Connected;
 
             var list = new List<PlayerState>();
