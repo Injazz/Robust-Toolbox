@@ -175,7 +175,13 @@ namespace Robust.Server.GameObjects
 
         private IDictionary<EntityUid, GameTick> GetLastSeen(IPlayerSession player)
         {
-            var lastSeen = GetLastSeen(player);
+            if (_playerLastSeen.TryGetValue(player, out var lastSeen))
+            {
+                return lastSeen;
+            }
+
+            lastSeen = new Dictionary<EntityUid, GameTick>();
+            _playerLastSeen[player] = lastSeen;
 
             return lastSeen;
         }
